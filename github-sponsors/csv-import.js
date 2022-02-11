@@ -46,6 +46,12 @@ const addFundsMutation = gql`
   }
 `;
 
+const sleep = (ms) => {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+};
+
 const catchException = () => {
   return null;
 };
@@ -113,9 +119,13 @@ async function main(argv = process.argv) {
 
     console.log(`Adding $${amount} to ${collective.slug} ${!options.run ? '(dry run)' : ''}`);
 
+    // Poor man rate-limiting (100 req / minute max on the API)
+    await sleep(600);
+
     if (options.run) {
       const result = await request(endpoint, addFundsMutation, variables);
       console.log(result);
+      await sleep(600);
     }
   }
 }
