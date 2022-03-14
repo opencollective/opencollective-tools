@@ -1,6 +1,7 @@
 require('../env');
 
 const fs = require('fs');
+const axios = require('axios').default;
 
 const { Command } = require('commander');
 const csvParseSync = require('csv-parse/sync'); // eslint-disable-line node/no-missing-require
@@ -8,6 +9,7 @@ const csvParseSync = require('csv-parse/sync'); // eslint-disable-line node/no-m
 const { request, gql } = require('graphql-request');
 
 const endpoint = `${process.env.API_URL}/graphql/v2/${process.env.API_KEY}`;
+const WISE_API_URL = process.env.TRANSFERWISE_API_URL || 'https://api.transferwise.com';
 
 const expensesQuery = gql`
   query {
@@ -40,6 +42,12 @@ const createExpenseMutation = gql`
     }
   }
 `;
+
+const tokenizeCard = (cardNumber) =>
+  axios
+    .post(`${WISE_API_URL}/v3/card`, { cardNumber })
+    .then((response) => response?.data?.cardToken)
+    .catch(catchException);
 
 const sleep = (ms) => {
   return new Promise((resolve) => {
@@ -85,7 +93,11 @@ async function main(argv = process.argv) {
       continue;
     }
 
-    // TODO: bankCard tokenization
+    const cardToken = await tokenizeCard(bankCard);
+    if (!cardToken) {
+      console.warn(`Could not tokenize card for ${email} ${name}, skipping...`);
+      continue;
+    }
 
     const variables = {
       account: { slug: '1kproject' },
@@ -103,8 +115,7 @@ async function main(argv = process.argv) {
         payoutMethod: {
           type: 'BANK_ACCOUNT',
           data: {
-            type: 'privatbank',
-            // type: 'CARD',
+            type: 'CARD',
             details: {
               email: email,
               address: {
@@ -113,9 +124,8 @@ async function main(argv = process.argv) {
                 postCode: postCode,
                 firstLine: address,
               },
+              cardToken,
               legalType: 'PRIVATE',
-              phoneNumber: `+${phone}`,
-              accountNumber: bankCard.slice(bankCard.length - 4),
             },
             currency: 'UAH',
             // country: 'UA',
