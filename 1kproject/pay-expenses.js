@@ -34,8 +34,8 @@ const expensesQuery = gql`
 `;
 
 const payExpenseMutation = gql`
-  mutation PayExpense($expense: ExpenseReferenceInput!) {
-    processExpense(expense: $expense, action: PAY) {
+  mutation PayExpense($expense: ExpenseReferenceInput!, $paymentParams: ProcessExpensePaymentParams!) {
+    processExpense(expense: $expense, action: PAY, paymentParams: $paymentParams) {
       id
     }
   }
@@ -56,8 +56,6 @@ async function main(argv = process.argv) {
   const program = getProgram(argv);
   const options = program.opts();
 
-  let twoFactorAuthenticatorCode;
-
   if (!options.run) {
     console.log(`This is a dry run, run the script with --run to trigger it for real.`);
   }
@@ -66,8 +64,9 @@ async function main(argv = process.argv) {
     .catch(catchException)
     .then((result) => result.expenses.nodes);
 
+  let tfaPrompt;
   for (const expense of expenses) {
-    if (!expense.type !== 'BANK_ACCOUNT' || !expense.data.accoutNumber) {
+    if (expense.payoutMethod?.type !== 'BANK_ACCOUNT' || !expense.payoutMethod?.data?.details?.cardToken) {
       console.log(
         `Unable to Pay Expense "${expense.description}", missing structured information ${
           !options.run ? '(dry run)' : ''
@@ -76,9 +75,9 @@ async function main(argv = process.argv) {
       continue;
     }
 
-    if (!twoFactorAuthenticatorCode) {
+    if (!tfaPrompt) {
       prompt.start();
-      twoFactorAuthenticatorCode = await prompt.get('2FA code');
+      tfaPrompt = await prompt.get({ name: 'tfa', description: '2FA Code' });
     }
 
     const variables = {
@@ -86,7 +85,8 @@ async function main(argv = process.argv) {
         id: expense.id,
       },
       paymentParams: {
-        twoFactorAuthenticatorCode,
+        twoFactorAuthenticatorCode: tfaPrompt.tfa,
+        feesPayer: 'PAYEE',
       },
     };
 

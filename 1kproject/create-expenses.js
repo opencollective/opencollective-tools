@@ -135,12 +135,9 @@ async function main(argv = process.argv) {
       },
     };
 
-    // console.log(variables);
-
     console.log(`Creating Expense ${variables.expense.description} ${!options.run ? '(dry run)' : ''}`);
-
-    // Poor man rate-limiting (100 req / minute max on the API)
-    await sleep(600);
+    // Increased Sleep time due to Tokenize Card API rate limit
+    await sleep(1000);
 
     if (options.run) {
       const result = await request(endpoint, createExpenseMutation, variables);
