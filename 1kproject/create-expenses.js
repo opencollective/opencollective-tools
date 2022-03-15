@@ -43,6 +43,15 @@ const createExpenseMutation = gql`
   }
 `;
 
+const approveExpenseMutation = gql/* GraphQL */ `
+  mutation ProcessExpense($expenseId: String!, $action: ExpenseProcessAction!) {
+    processExpense(expense: { id: $expenseId }, action: $action) {
+      id
+      status
+    }
+  }
+`;
+
 const tokenizeCard = (cardNumber) =>
   axios
     .post(`${WISE_API_URL}/v3/card`, { cardNumber })
@@ -82,7 +91,7 @@ async function main(argv = process.argv) {
     const postCode = record['POST CODE'];
     const address = record['ADDRESS'];
     const city = record['CITY'];
-    const phone = record['PHONE'];
+    // const phone = record['PHONE'];
     const bankCard = record['BANK CARD'];
     const name = record['NAME'];
 
@@ -93,7 +102,7 @@ async function main(argv = process.argv) {
       continue;
     }
 
-    const cardToken = await tokenizeCard(bankCard);
+    const cardToken = options.run ? await tokenizeCard(bankCard) : 'fake-token';
     if (!cardToken) {
       console.warn(`Could not tokenize card for ${email} ${name}, skipping...`);
       continue;
@@ -128,7 +137,6 @@ async function main(argv = process.argv) {
               legalType: 'PRIVATE',
             },
             currency: 'UAH',
-            // country: 'UA',
             accountHolderName: name,
           },
         },
@@ -136,13 +144,16 @@ async function main(argv = process.argv) {
     };
 
     console.log(`Creating Expense ${variables.expense.description} ${!options.run ? '(dry run)' : ''}`);
-    // Increased Sleep time due to Tokenize Card API rate limit
-    await sleep(1000);
 
     if (options.run) {
       const result = await request(endpoint, createExpenseMutation, variables);
       console.log(result);
-      await sleep(600);
+
+      const expenseId = result.createExpense.id;
+      await request(endpoint, approveExpenseMutation, { expenseId: expenseId, action: 'APPROVE' });
+
+      // Increased Sleep time due to Tokenize Card API rate limit
+      await sleep(6000);
     }
   }
 }
