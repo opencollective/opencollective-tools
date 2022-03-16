@@ -2,6 +2,7 @@ require('../env');
 
 const fs = require('fs');
 const axios = require('axios').default;
+const { deburr, replace } = require('lodash');
 
 const { Command } = require('commander');
 const csvParseSync = require('csv-parse/sync'); // eslint-disable-line node/no-missing-require
@@ -53,10 +54,7 @@ const approveExpenseMutation = gql/* GraphQL */ `
 `;
 
 const tokenizeCard = (cardNumber) =>
-  axios
-    .post(`${WISE_API_URL}/v3/card`, { cardNumber })
-    .then((response) => response?.data?.cardToken)
-    .catch(catchException);
+  axios.post(`${WISE_API_URL}/v3/card`, { cardNumber }).then((response) => response?.data?.cardToken);
 
 const sleep = (ms) => {
   return new Promise((resolve) => {
@@ -93,7 +91,7 @@ async function main(argv = process.argv) {
     const city = record['CITY'];
     // const phone = record['PHONE'];
     const bankCard = record['BANK CARD'];
-    const name = record['NAME'];
+    const name = replace(deburr(record['NAME']), /['`ʹ]/gm, '');
 
     const match = allExpenses.map((expense) => JSON.stringify(expense)).some((string) => string.includes(email));
 
@@ -102,10 +100,19 @@ async function main(argv = process.argv) {
       continue;
     }
 
-    const cardToken = options.run ? await tokenizeCard(bankCard) : 'fake-token';
-    if (!cardToken) {
-      console.warn(`Could not tokenize card for ${email} ${name}, skipping...`);
-      continue;
+    let cardToken = 'fake-token';
+    if (options.run) {
+      try {
+        cardToken = await tokenizeCard(bankCard);
+      } catch (e) {
+        if (e.response.status === 429) {
+          console.log('Hitted API rate limit, waiting and retrying');
+          await sleep(10000);
+          cardToken = await tokenizeCard(bankCard);
+        } else {
+          throw e.response?.data || e;
+        }
+      }
     }
 
     const variables = {
@@ -146,6 +153,9 @@ async function main(argv = process.argv) {
     console.log(`Creating Expense ${variables.expense.description} ${!options.run ? '(dry run)' : ''}`);
 
     if (options.run) {
+      if (cardToken === 'fake-token' || !cardToken) {
+        throw new Error('Test card passed to run, aborting...');
+      }
       const result = await request(endpoint, createExpenseMutation, variables);
       console.log(result);
 
@@ -153,7 +163,7 @@ async function main(argv = process.argv) {
       await request(endpoint, approveExpenseMutation, { expenseId: expenseId, action: 'APPROVE' });
 
       // Increased Sleep time due to Tokenize Card API rate limit
-      await sleep(6000);
+      await sleep(7000);
     }
   }
 }

@@ -64,6 +64,7 @@ async function main(argv = process.argv) {
     .catch(catchException)
     .then((result) => result.expenses.nodes);
 
+  console.log(`Found ${expenses.length} APPROVED expenses.`);
   let tfaPrompt;
   for (const expense of expenses) {
     if (expense.payoutMethod?.type !== 'BANK_ACCOUNT' || !expense.payoutMethod?.data?.details?.cardToken) {
