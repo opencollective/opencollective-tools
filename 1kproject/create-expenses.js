@@ -2,7 +2,7 @@ require('../env');
 
 const fs = require('fs');
 const axios = require('axios').default;
-const { deburr, replace } = require('lodash');
+const { deburr, replace, startsWith, toString } = require('lodash');
 
 const { Command } = require('commander');
 const csvParseSync = require('csv-parse/sync'); // eslint-disable-line node/no-missing-require
@@ -62,6 +62,9 @@ const sleep = (ms) => {
   });
 };
 
+// https://en.wikipedia.org/wiki/Postal_codes_in_Ukraine
+const SANCTIONED_REGIONS_POSTAL_CODE_PREFIX = [95, 96, 97, 98, 91, 92, 93, 94, 83, 84, 85, 86, 87];
+
 const catchException = (e) => {
   console.log(e);
   return null;
@@ -89,12 +92,15 @@ async function main(argv = process.argv) {
     const postCode = record['POST CODE'];
     const address = record['ADDRESS'];
     const city = record['CITY'];
-    // const phone = record['PHONE'];
     const bankCard = record['BANK CARD'];
-    const name = replace(deburr(record['NAME']), /['`ʹ]/gm, '');
+    const name = replace(replace(deburr(record['NAME']), /['`ʹ]/gm, ''), /\s+/gm, ' ');
+
+    if (SANCTIONED_REGIONS_POSTAL_CODE_PREFIX.some((zip) => startsWith(postCode, toString(zip)))) {
+      console.log(`Skipping ${name} ${email}: sanctioned zipcode ${postCode}, ${address}`);
+      continue;
+    }
 
     const match = allExpenses.map((expense) => JSON.stringify(expense)).some((string) => string.includes(email));
-
     if (match) {
       console.log(`Skipping for ${email} ${!options.run ? '(dry run)' : ''}`);
       continue;
