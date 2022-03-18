@@ -47,25 +47,21 @@ const sleep = (ms) => {
   });
 };
 
-const catchException = (e) => {
-  console.log(e);
-  return null;
-};
-
 async function main(argv = process.argv) {
   const program = getProgram(argv);
   const options = program.opts();
+
+  let tfaPrompt;
+  prompt.start();
 
   if (!options.run) {
     console.log(`This is a dry run, run the script with --run to trigger it for real.`);
   }
 
-  const expenses = await request(endpoint, expensesQuery)
-    .catch(catchException)
-    .then((result) => result.expenses.nodes);
+  const expenses = await request(endpoint, expensesQuery).then((result) => result.expenses.nodes);
 
   console.log(`Found ${expenses.length} APPROVED expenses.`);
-  let tfaPrompt;
+
   for (const expense of expenses) {
     if (expense.payoutMethod?.type !== 'BANK_ACCOUNT' || !expense.payoutMethod?.data?.details?.cardToken) {
       console.log(
@@ -76,17 +72,11 @@ async function main(argv = process.argv) {
       continue;
     }
 
-    if (!tfaPrompt) {
-      prompt.start();
-      tfaPrompt = await prompt.get({ name: 'tfa', description: '2FA Code' });
-    }
-
     const variables = {
       expense: {
         id: expense.id,
       },
       paymentParams: {
-        twoFactorAuthenticatorCode: tfaPrompt.tfa,
         feesPayer: 'PAYEE',
       },
     };
@@ -97,8 +87,23 @@ async function main(argv = process.argv) {
     await sleep(600);
 
     if (options.run) {
-      const result = await request(endpoint, payExpenseMutation, variables);
+      let result;
+      try {
+        result = await request(endpoint, payExpenseMutation, variables);
+      } catch (e) {
+        if (e.message.includes('Two-factor authentication')) {
+          tfaPrompt = await prompt.get({ name: 'tfa', description: '2FA Code' });
+          variables.paymentParams.twoFactorAuthenticatorCode = tfaPrompt.tfa;
+          result = await request(endpoint, payExpenseMutation, variables);
+        } else {
+          throw e;
+        }
+      }
+
       console.log(result);
+
+      tfaPrompt = null;
+
       await sleep(600);
     }
   }

@@ -14,7 +14,7 @@ const WISE_API_URL = process.env.TRANSFERWISE_API_URL || 'https://api.transferwi
 
 const expensesQuery = gql`
   query {
-    expenses(account: { slug: "1kproject" }, limit: 100) {
+    expenses(account: { slug: "1kproject" }, limit: 1000) {
       totalCount
       nodes {
         id
@@ -44,7 +44,7 @@ const createExpenseMutation = gql`
   }
 `;
 
-const approveExpenseMutation = gql/* GraphQL */ `
+const processExpenseMutation = gql/* GraphQL */ `
   mutation ProcessExpense($expenseId: String!, $action: ExpenseProcessAction!) {
     processExpense(expense: { id: $expenseId }, action: $action) {
       id
@@ -112,7 +112,7 @@ async function main(argv = process.argv) {
         cardToken = await tokenizeCard(bankCard);
       } catch (e) {
         if (e.response.status === 429) {
-          console.log('Hitted API rate limit, waiting and retrying');
+          console.log('Wise API rate limit, waiting and retrying');
           await sleep(10000);
           cardToken = await tokenizeCard(bankCard);
         } else {
@@ -166,7 +166,7 @@ async function main(argv = process.argv) {
       console.log(result);
 
       const expenseId = result.createExpense.id;
-      await request(endpoint, approveExpenseMutation, { expenseId: expenseId, action: 'APPROVE' });
+      await request(endpoint, processExpenseMutation, { expenseId: expenseId, action: 'APPROVE' });
 
       // Increased Sleep time due to Tokenize Card API rate limit
       await sleep(7000);
