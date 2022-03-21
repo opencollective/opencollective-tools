@@ -10,7 +10,7 @@ const endpoint = `${process.env.API_URL}/graphql/v2/${process.env.API_KEY}`;
 
 const expensesQuery = gql`
   query {
-    expenses(account: { slug: "1kproject" }, limit: 100, status: APPROVED) {
+    expenses(account: { slug: "1kproject" }, limit: 1000, status: APPROVED) {
       totalCount
       nodes {
         id
@@ -83,10 +83,10 @@ async function main(argv = process.argv) {
 
     console.log(`Paying Expense "${expense.description}" ${!options.run ? '(dry run)' : ''}`);
 
-    // Poor man rate-limiting (100 req / minute max on the API)
-    await sleep(600);
-
     if (options.run) {
+      // Poor man rate-limiting (100 req / minute max on the API)
+      await sleep(10000);
+
       let result;
       try {
         result = await request(endpoint, payExpenseMutation, variables);
@@ -98,13 +98,10 @@ async function main(argv = process.argv) {
         } else {
           throw e;
         }
+        tfaPrompt = null;
       }
 
       console.log(result);
-
-      tfaPrompt = null;
-
-      await sleep(600);
     }
   }
 }
