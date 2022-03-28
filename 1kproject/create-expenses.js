@@ -14,7 +14,7 @@ const WISE_API_URL = process.env.TRANSFERWISE_API_URL || 'https://api.transferwi
 
 const expensesQuery = gql`
   query {
-    expenses(account: { slug: "1kproject" }, limit: 100) {
+    expenses(account: { slug: "1kproject" }, limit: 1000) {
       totalCount
       nodes {
         id
@@ -44,7 +44,7 @@ const createExpenseMutation = gql`
   }
 `;
 
-const approveExpenseMutation = gql/* GraphQL */ `
+const processExpenseMutation = gql/* GraphQL */ `
   mutation ProcessExpense($expenseId: String!, $action: ExpenseProcessAction!) {
     processExpense(expense: { id: $expenseId }, action: $action) {
       id
@@ -52,6 +52,9 @@ const approveExpenseMutation = gql/* GraphQL */ `
     }
   }
 `;
+
+// https://en.wikipedia.org/wiki/Postal_codes_in_Ukraine
+const SANCTIONED_REGIONS_POSTAL_CODE_PREFIX = [95, 96, 97, 98, 91, 92, 93, 94, 83, 84, 85, 86, 87];
 
 const tokenizeCard = (cardNumber) =>
   axios.post(`${WISE_API_URL}/v3/card`, { cardNumber }).then((response) => response?.data?.cardToken);
@@ -61,9 +64,6 @@ const sleep = (ms) => {
     setTimeout(resolve, ms);
   });
 };
-
-// https://en.wikipedia.org/wiki/Postal_codes_in_Ukraine
-const SANCTIONED_REGIONS_POSTAL_CODE_PREFIX = [95, 96, 97, 98, 91, 92, 93, 94, 83, 84, 85, 86, 87];
 
 const catchException = (e) => {
   console.log(e);
@@ -109,14 +109,18 @@ async function main(argv = process.argv) {
     let cardToken = 'fake-token';
     if (options.run) {
       try {
+        // console.log(`Tokenizing ${bankCard}`);
         cardToken = await tokenizeCard(bankCard);
       } catch (e) {
         if (e.response.status === 429) {
-          console.log('Hitted API rate limit, waiting and retrying');
+          console.log('Wise API rate limit, waiting and retrying');
           await sleep(10000);
+          // console.log(`Tokenizing ${bankCard} (retry)`);
           cardToken = await tokenizeCard(bankCard);
         } else {
-          throw e.response?.data || e;
+          console.log(`Error Tokenizing ${bankCard}, skipping.`);
+          console.log(e);
+          continue;
         }
       }
     }
@@ -162,14 +166,21 @@ async function main(argv = process.argv) {
       if (cardToken === 'fake-token' || !cardToken) {
         throw new Error('Test card passed to run, aborting...');
       }
-      const result = await request(endpoint, createExpenseMutation, variables);
-      console.log(result);
 
-      const expenseId = result.createExpense.id;
-      await request(endpoint, approveExpenseMutation, { expenseId: expenseId, action: 'APPROVE' });
+      try {
+        const result = await request(endpoint, createExpenseMutation, variables);
+        console.log(result);
 
-      // Increased Sleep time due to Tokenize Card API rate limit
-      await sleep(7000);
+        const expenseId = result.createExpense.id;
+        await request(endpoint, processExpenseMutation, { expenseId: expenseId, action: 'APPROVE' });
+      } catch (e) {
+        console.log(e);
+        continue;
+      }
+
+      // Slow down for both Open Collective and Wise API Limits
+      // (100 req / minute max on Open Collective API)
+      await sleep(12000);
     }
   }
 }
