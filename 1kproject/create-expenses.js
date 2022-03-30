@@ -40,11 +40,12 @@ const createExpenseMutation = gql`
   mutation CreateExpense($expense: ExpenseCreateInput!, $account: AccountReferenceInput!) {
     createExpense(expense: $expense, account: $account) {
       id
+      legacyId
     }
   }
 `;
 
-const processExpenseMutation = gql/* GraphQL */ `
+const processExpenseMutation = gql`
   mutation ProcessExpense($expenseId: String!, $action: ExpenseProcessAction!) {
     processExpense(expense: { id: $expenseId }, action: $action) {
       id
@@ -93,11 +94,10 @@ async function main(argv = process.argv) {
     const address = record['ADDRESS'];
     const city = record['CITY'];
     const bankCard = record['BANK CARD'];
-    const name = replace(replace(deburr(record['NAME']), /['`ʹ]/gm, ''), /\s+/gm, ' ');
+    const name = replace(replace(deburr(record['NAME']), /['`ʹ‘]/gm, ''), /\s+/gm, ' ');
 
     if (SANCTIONED_REGIONS_POSTAL_CODE_PREFIX.some((zip) => startsWith(postCode, toString(zip)))) {
-      console.log(`Skipping ${name} ${email}: sanctioned zipcode ${postCode}, ${address}`);
-      continue;
+      console.log(`Warning! Potential sanctioned zipcode for ${name} ${email}: ${address}, ${postCode} ${city}`);
     }
 
     const match = allExpenses.map((expense) => JSON.stringify(expense)).some((string) => string.includes(email));
@@ -112,14 +112,13 @@ async function main(argv = process.argv) {
         // console.log(`Tokenizing ${bankCard}`);
         cardToken = await tokenizeCard(bankCard);
       } catch (e) {
+        await sleep(2000);
         if (e.response.status === 429) {
-          console.log('Wise API rate limit, waiting and retrying');
-          await sleep(10000);
-          // console.log(`Tokenizing ${bankCard} (retry)`);
+          console.log('Wise API rate limit, retrying.');
           cardToken = await tokenizeCard(bankCard);
         } else {
-          console.log(`Error Tokenizing ${bankCard}, skipping.`);
-          console.log(e);
+          console.log(`Error Tokenizing ${bankCard}: ${e.response.statusText}. Skipping.`);
+          // console.log(e);
           continue;
         }
       }
@@ -169,10 +168,8 @@ async function main(argv = process.argv) {
 
       try {
         const result = await request(endpoint, createExpenseMutation, variables);
-        console.log(result);
-
-        const expenseId = result.createExpense.id;
-        await request(endpoint, processExpenseMutation, { expenseId: expenseId, action: 'APPROVE' });
+        console.log(`Success! https://opencollective.com/1kproject/expenses/${result.createExpense.legacyId}`);
+        await request(endpoint, processExpenseMutation, { expenseId: result.createExpense.id, action: 'APPROVE' });
       } catch (e) {
         console.log(e);
         continue;
