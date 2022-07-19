@@ -18,6 +18,7 @@ const expensesQuery = gql`
       totalCount
       nodes {
         id
+        legacyId
         createdAt
         status
         amount
@@ -89,7 +90,7 @@ async function main(argv = process.argv) {
     .then((result) => result.expenses.nodes);
 
   for (const record of records) {
-    const email = record['EMAIL'];
+    const email = 'donors@1kproject.org';
     const postCode = record['POST CODE'];
     const address = record['ADDRESS'];
     const city = record['CITY'];
@@ -97,13 +98,13 @@ async function main(argv = process.argv) {
     const name = replace(replace(deburr(record['NAME']), /['`ʹ‘]/gm, ''), /\s+/gm, ' ');
 
     if (SANCTIONED_REGIONS_POSTAL_CODE_PREFIX.some((zip) => startsWith(postCode, toString(zip)))) {
-      console.log(`Warning! Potential sanctioned zipcode for ${name} ${email}: ${address}, ${postCode} ${city}`);
+      console.log(`Warning! Potential sanctioned zipcode for ${name} ${email}: ${postCode} ${city}`);
     }
 
-    const match = allExpenses.map((expense) => JSON.stringify(expense)).some((string) => string.includes(email));
+    const match = allExpenses.find((expense) => JSON.stringify(expense).includes(name));
     if (match) {
-      console.log(`Skipping for ${email} ${!options.run ? '(dry run)' : ''}`);
-      continue;
+      // console.log(`Skipping for ${name} ${!options.run ? '(dry run)' : ''}`);
+      console.log(`Warning! Existing expense: https://opencollective.com/1kproject/expenses/${match.legacyId}`);
     }
 
     let cardToken = 'fake-token';
@@ -112,12 +113,14 @@ async function main(argv = process.argv) {
         // console.log(`Tokenizing ${bankCard}`);
         cardToken = await tokenizeCard(bankCard);
       } catch (e) {
+        console.log(e);
         await sleep(2000);
         if (e.response.status === 429) {
-          console.log('Wise API rate limit, retrying.');
+          console.log('Wise API rate limit, retrying in 5 seconds.');
+          await sleep(5000);
           cardToken = await tokenizeCard(bankCard);
         } else {
-          console.log(`Error Tokenizing ${bankCard}: ${e.response.statusText}. Skipping.`);
+          console.log(`Error Tokenizing for ${email} ${bankCard}: ${e.response.statusText}. Skipping.`);
           // console.log(e);
           continue;
         }
