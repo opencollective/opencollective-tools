@@ -9,6 +9,8 @@ API_KEY=XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 API_URL=https://api.opencollective.com
 ```
 
+2. Run `npm install`
+
 ## GitHub Sponsors
 
 ### CSV Import
@@ -30,6 +32,8 @@ If you see:
 
 ## 1kproject
 
+To run the scripts, you need to be an admin of https://opencollective.com/ukrainian-families-1k and https://opencollective.com/foundation. Ask someone to invite you beforehand if necessary.
+
 1. Download the CSV file and name it with a shorter name like `Bulk_07_21.csv`
 
 2. Launch the dry run for Expense Creation with:
@@ -38,7 +42,7 @@ If you see:
 
 Check any warning before proceeding, if there is a problem remove the entries from the CSV.
 
-3. Once happy with the dry run, launch the Expense Creation with:
+3. Once happy with the dry run, launch Expense Creation with:
 
 `node 1kproject/create-expenses.js Bulk_07_21.csv --run`
 
