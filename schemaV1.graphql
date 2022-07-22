@@ -37,6 +37,7 @@ interface CollectiveInterface {
   id: Int
   createdByUser: UserDetails
   parentCollective: CollectiveInterface
+  children: [CollectiveInterface]!
   type: String
   isActive: Boolean
   name: String
@@ -79,6 +80,11 @@ interface CollectiveInterface {
   path: String
   isHost: Boolean
   isIncognito: Boolean
+
+  """
+  Whether this account is frozen
+  """
+  isFrozen: Boolean!
   isGuest: Boolean
   canApply: Boolean
   canContact: Boolean
@@ -166,7 +172,8 @@ interface CollectiveInterface {
   expenses(type: String, limit: Int, offset: Int, status: String, includeHostedCollectives: Boolean): [ExpenseType]
   role: String
   twitterHandle: String
-  githubHandle: String
+  githubHandle: String @deprecated(reason: "2022-06-03: Please use repositoryUrl")
+  repositoryUrl: String
   website: String
   updates(limit: Int, offset: Int, onlyPublishedUpdates: Boolean): [UpdateType]
   events(
@@ -252,7 +259,7 @@ type UserDetails {
   CollectiveId: Int
   collective: CollectiveInterface
   username: String @deprecated(reason: "2022-01-13: Not used anymore. Will be ignored")
-  name: String
+  name: String @deprecated(reason: "2022-06-02: Please use collective.name")
   image: String
   email: String
   emailWaitingForValidation: String
@@ -490,11 +497,7 @@ The `JSON` scalar type represents JSON values as specified by [ECMA-404](http://
 """
 scalar JSON
 
-"""
-A person or an entity that contributes financially or by any other mean to the mission
-of the collective. While "Member" is dedicated to permissions, this type is meant
-to surface all the public contributors.
-"""
+"\n    A person or an entity that contributes financially or by any other mean to the mission\n    of the collective. While \"Member\" is dedicated to permissions, this type is meant\n    to surface all the public contributors.\n  "
 type Contributor {
   """
   A unique identifier for this member
@@ -1073,6 +1076,7 @@ type CollectiveFeatures {
   The id of the account
   """
   id: String!
+  ALL: CollectiveFeatureStatus
   RECEIVE_FINANCIAL_CONTRIBUTIONS: CollectiveFeatureStatus
   RECURRING_CONTRIBUTIONS: CollectiveFeatureStatus
   TRANSACTIONS: CollectiveFeatureStatus
@@ -1144,7 +1148,7 @@ type PlanType {
   transferwisePayouts: Int
   transferwisePayoutsLimit: Int
   hostFees: Boolean
-  hostFeeSharePercent: Int
+  hostFeeSharePercent: Float
   platformTips: Boolean
 }
 
@@ -1343,6 +1347,7 @@ type Collective implements CollectiveInterface {
   id: Int
   createdByUser: UserDetails
   parentCollective: CollectiveInterface
+  children: [CollectiveInterface]!
   type: String
   isActive: Boolean
   name: String
@@ -1408,6 +1413,11 @@ type Collective implements CollectiveInterface {
   Returns whether this collective is a guest profile
   """
   isGuest: Boolean
+
+  """
+  Whether this account is frozen
+  """
+  isFrozen: Boolean!
 
   """
   Returns whether this collective is archived
@@ -1498,7 +1508,12 @@ type Collective implements CollectiveInterface {
   expenses(type: String, limit: Int, offset: Int, includeHostedCollectives: Boolean, status: String): [ExpenseType]
   role: String
   twitterHandle: String
-  githubHandle: String
+  githubHandle: String @deprecated(reason: "2022-06-03: Please use repositoryUrl")
+
+  """
+  The URL of the repository
+  """
+  repositoryUrl: String
   website: String
   updates(limit: Int, offset: Int, onlyPublishedUpdates: Boolean): [UpdateType]
   events(
@@ -1573,6 +1588,7 @@ type Event implements CollectiveInterface {
   id: Int
   createdByUser: UserDetails
   parentCollective: CollectiveInterface
+  children: [CollectiveInterface]!
   type: String
   isActive: Boolean
   name: String
@@ -1638,6 +1654,11 @@ type Event implements CollectiveInterface {
   Returns whether this collective is a guest profile
   """
   isGuest: Boolean
+
+  """
+  Whether this account is frozen
+  """
+  isFrozen: Boolean!
 
   """
   Returns whether this collective is archived
@@ -1728,7 +1749,12 @@ type Event implements CollectiveInterface {
   expenses(type: String, limit: Int, offset: Int, includeHostedCollectives: Boolean, status: String): [ExpenseType]
   role: String
   twitterHandle: String
-  githubHandle: String
+  githubHandle: String @deprecated(reason: "2022-06-03: Please use repositoryUrl")
+
+  """
+  The URL of the repository
+  """
+  repositoryUrl: String
   website: String
   updates(limit: Int, offset: Int, onlyPublishedUpdates: Boolean): [UpdateType]
   events(
@@ -1803,6 +1829,7 @@ type Fund implements CollectiveInterface {
   id: Int
   createdByUser: UserDetails
   parentCollective: CollectiveInterface
+  children: [CollectiveInterface]!
   type: String
   isActive: Boolean
   name: String
@@ -1868,6 +1895,11 @@ type Fund implements CollectiveInterface {
   Returns whether this collective is a guest profile
   """
   isGuest: Boolean
+
+  """
+  Whether this account is frozen
+  """
+  isFrozen: Boolean!
 
   """
   Returns whether this collective is archived
@@ -1958,7 +1990,12 @@ type Fund implements CollectiveInterface {
   expenses(type: String, limit: Int, offset: Int, includeHostedCollectives: Boolean, status: String): [ExpenseType]
   role: String
   twitterHandle: String
-  githubHandle: String
+  githubHandle: String @deprecated(reason: "2022-06-03: Please use repositoryUrl")
+
+  """
+  The URL of the repository
+  """
+  repositoryUrl: String
   website: String
   updates(limit: Int, offset: Int, onlyPublishedUpdates: Boolean): [UpdateType]
   events(
@@ -2033,6 +2070,7 @@ type Organization implements CollectiveInterface {
   id: Int
   createdByUser: UserDetails
   parentCollective: CollectiveInterface
+  children: [CollectiveInterface]!
   type: String
   isActive: Boolean
   name: String
@@ -2098,6 +2136,11 @@ type Organization implements CollectiveInterface {
   Returns whether this collective is a guest profile
   """
   isGuest: Boolean
+
+  """
+  Whether this account is frozen
+  """
+  isFrozen: Boolean!
 
   """
   Returns whether this collective is archived
@@ -2188,7 +2231,12 @@ type Organization implements CollectiveInterface {
   expenses(type: String, limit: Int, offset: Int, includeHostedCollectives: Boolean, status: String): [ExpenseType]
   role: String
   twitterHandle: String
-  githubHandle: String
+  githubHandle: String @deprecated(reason: "2022-06-03: Please use repositoryUrl")
+
+  """
+  The URL of the repository
+  """
+  repositoryUrl: String
   website: String
   updates(limit: Int, offset: Int, onlyPublishedUpdates: Boolean): [UpdateType]
   events(
@@ -2264,6 +2312,7 @@ type Project implements CollectiveInterface {
   id: Int
   createdByUser: UserDetails
   parentCollective: CollectiveInterface
+  children: [CollectiveInterface]!
   type: String
   isActive: Boolean
   name: String
@@ -2329,6 +2378,11 @@ type Project implements CollectiveInterface {
   Returns whether this collective is a guest profile
   """
   isGuest: Boolean
+
+  """
+  Whether this account is frozen
+  """
+  isFrozen: Boolean!
 
   """
   Returns whether this collective is archived
@@ -2419,7 +2473,12 @@ type Project implements CollectiveInterface {
   expenses(type: String, limit: Int, offset: Int, includeHostedCollectives: Boolean, status: String): [ExpenseType]
   role: String
   twitterHandle: String
-  githubHandle: String
+  githubHandle: String @deprecated(reason: "2022-06-03: Please use repositoryUrl")
+
+  """
+  The URL of the repository
+  """
+  repositoryUrl: String
   website: String
   updates(limit: Int, offset: Int, onlyPublishedUpdates: Boolean): [UpdateType]
   events(
@@ -2532,6 +2591,11 @@ type Expense implements Transaction {
   taxAmount: Int
 
   """
+  If taxAmount is set, this field will contain more info about the tax
+  """
+  taxInfo: TaxInfo
+
+  """
   Amount after fees received by the collective in the lowest unit of its own currency (ie. cents)
   """
   netAmountInCollectiveCurrency(
@@ -2549,8 +2613,54 @@ type Expense implements Transaction {
   createdAt: DateString
   updatedAt: DateString
   paymentMethod: PaymentMethodType
+  invoiceTemplate: String
   description: String
   expense: ExpenseType
+}
+
+"""
+Information about a tax
+"""
+type TaxInfo {
+  """
+  An unique identifier for this tax (GST, VAT, etc)
+  """
+  id: String!
+
+  """
+  Identifier for this tax (GST, VAT, etc)
+  """
+  type: OrderTaxType!
+
+  """
+  Percentage applied, between 0-100
+  """
+  percentage: Int! @deprecated(reason: "Please use `rate` instead")
+
+  """
+  Percentage applied, between 0-100
+  """
+  rate: Float!
+
+  """
+  Tax ID number of the 3rd party receiving/paying the tax
+  """
+  idNumber: String
+}
+
+"""
+The type of a tax like GST, VAT, etc
+"""
+enum OrderTaxType {
+  """
+  European Value Added Tax
+  """
+  VAT
+
+  """
+  New Zealand Good and Services Tax
+  """
+  GST
 }
 
 """
@@ -2588,6 +2698,7 @@ interface Transaction {
   platformFeeInHostCurrency: Int
   paymentProcessorFeeInHostCurrency: Int
   taxAmount: Int
+  taxInfo: TaxInfo
   createdByUser: UserDetails
   host: CollectiveInterface
   paymentMethod: PaymentMethodType
@@ -2600,6 +2711,7 @@ interface Transaction {
   createdAt: DateString
   updatedAt: DateString
   refundTransaction: Transaction
+  invoiceTemplate: String
 }
 
 """
@@ -2647,6 +2759,11 @@ type Order implements Transaction {
   taxAmount: Int
 
   """
+  If taxAmount is set, this field will contain more info about the tax
+  """
+  taxInfo: TaxInfo
+
+  """
   Amount after fees received by the collective in the lowest unit of its own currency (ie. cents)
   """
   netAmountInCollectiveCurrency(
@@ -2664,6 +2781,7 @@ type Order implements Transaction {
   createdAt: DateString
   updatedAt: DateString
   paymentMethod: PaymentMethodType
+  invoiceTemplate: String
   description: String
   publicMessage: String
   order: OrderType
@@ -2677,6 +2795,7 @@ type User implements CollectiveInterface {
   id: Int
   createdByUser: UserDetails
   parentCollective: CollectiveInterface
+  children: [CollectiveInterface]!
   type: String
   isActive: Boolean
   name: String
@@ -2742,6 +2861,11 @@ type User implements CollectiveInterface {
   Returns whether this collective is a guest profile
   """
   isGuest: Boolean
+
+  """
+  Whether this account is frozen
+  """
+  isFrozen: Boolean!
 
   """
   Returns whether this collective is archived
@@ -2832,7 +2956,12 @@ type User implements CollectiveInterface {
   expenses(type: String, limit: Int, offset: Int, includeHostedCollectives: Boolean, status: String): [ExpenseType]
   role: String
   twitterHandle: String
-  githubHandle: String
+  githubHandle: String @deprecated(reason: "2022-06-03: Please use repositoryUrl")
+
+  """
+  The URL of the repository
+  """
+  repositoryUrl: String
   website: String
   updates(limit: Int, offset: Int, onlyPublishedUpdates: Boolean): [UpdateType]
   events(
@@ -2909,6 +3038,7 @@ type Vendor implements CollectiveInterface {
   id: Int
   createdByUser: UserDetails
   parentCollective: CollectiveInterface
+  children: [CollectiveInterface]!
   type: String
   isActive: Boolean
   name: String
@@ -2974,6 +3104,11 @@ type Vendor implements CollectiveInterface {
   Returns whether this collective is a guest profile
   """
   isGuest: Boolean
+
+  """
+  Whether this account is frozen
+  """
+  isFrozen: Boolean!
 
   """
   Returns whether this collective is archived
@@ -3064,7 +3199,12 @@ type Vendor implements CollectiveInterface {
   expenses(type: String, limit: Int, offset: Int, includeHostedCollectives: Boolean, status: String): [ExpenseType]
   role: String
   twitterHandle: String
-  githubHandle: String
+  githubHandle: String @deprecated(reason: "2022-06-03: Please use repositoryUrl")
+
+  """
+  The URL of the repository
+  """
+  repositoryUrl: String
   website: String
   updates(limit: Int, offset: Int, onlyPublishedUpdates: Boolean): [UpdateType]
   events(
@@ -3155,12 +3295,7 @@ type Query {
     transactionUuid: String!
   ): InvoiceType
 
-  """
-  Given a collective, returns all its transactions:
-  - Debit transactions made by collective without using a gift card
-  - Debit transactions made using a gift card from collective
-  - Credit transactions made to collective
-  """
+  "\n    Given a collective, returns all its transactions:\n    - Debit transactions made by collective without using a gift card\n    - Debit transactions made using a gift card from collective\n    - Credit transactions made to collective\n    "
   allTransactions(
     CollectiveId: Int
     collectiveSlug: String
@@ -3337,6 +3472,11 @@ type Query {
     skipRecentAccounts: Boolean = false
 
     """
+    Whether to skip guest accounts
+    """
+    skipGuests: Boolean = true
+
+    """
     Limit the amount of results. Defaults to 20
     """
     limit: Int = 20
@@ -3357,16 +3497,6 @@ This represents an Invoice
 """
 type InvoiceType {
   slug: String
-
-  """
-  Title for the invoice. Depending on the type of legal entity, a host should issue an Invoice or a Receipt.
-  """
-  title: String
-
-  """
-  more info about the invoice, which is then printed on receipts that go to financial contributors.
-  """
-  extraInfo: String
 
   """
   dateFrom and dateTo will be set for any invoice over a period of time. They will not be set for an invoice for a single transaction.
@@ -3456,6 +3586,7 @@ This is the root mutation
 type Mutation {
   createCollective(collective: CollectiveInputType!): CollectiveInterface
   createCollectiveFromGithub(collective: CollectiveInputType!): CollectiveInterface
+    @deprecated(reason: "2022-05-03: This mutation is deprecated and can only be used in test environments.")
   editCollective(collective: CollectiveInputType!): CollectiveInterface
   deleteCollective(id: Int!): CollectiveInterface
   deleteUserCollective(id: Int!): CollectiveInterface
@@ -3725,7 +3856,8 @@ input CollectiveInputType {
   company: String
   website: String
   twitterHandle: String
-  githubHandle: String
+  githubHandle: String @deprecated(reason: "2022-06-03: Please use repositoryUrl")
+  repositoryUrl: String
   description: String
   longDescription: String
   expensePolicy: String
@@ -3841,6 +3973,11 @@ input TierInputType {
   End of the campaign
   """
   endsAt: String
+
+  """
+  Invoice receipt template
+  """
+  invoiceTemplate: String
 }
 
 """
@@ -3892,7 +4029,8 @@ input CollectiveAttributesInputType {
   expensePolicy: String
   website: String
   twitterHandle: String
-  githubHandle: String
+  githubHandle: String @deprecated(reason: "2022-06-03: Please use repositoryUrl")
+  repositoryUrl: String
   location: LocationInputType
   startsAt: String
   endsAt: String
@@ -3935,7 +4073,8 @@ input UserInputType {
   username: String @deprecated(reason: "2022-01-13: Not used anymore. Will be ignored")
   description: String
   twitterHandle: String
-  githubHandle: String
+  githubHandle: String @deprecated(reason: "2022-06-03: Please use repositoryUrl")
+  repositoryUrl: String
   website: String
   newsletterOptIn: Boolean
   location: LocationInputType
