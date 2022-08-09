@@ -2,7 +2,7 @@ require('../env');
 
 const fs = require('fs');
 const axios = require('axios').default;
-const { deburr, replace, startsWith, toString } = require('lodash');
+const { deburr, replace, startsWith, toString, cloneDeep } = require('lodash');
 
 const { Command } = require('commander');
 const csvParseSync = require('csv-parse/sync'); // eslint-disable-line node/no-missing-require
@@ -127,7 +127,8 @@ async function main(argv = process.argv) {
       }
     }
 
-    const variables = {
+    const splitExpenseCount = options.split ? 2 : 1;
+    const baseVariables = {
       account: { slug: '1kproject' },
       expense: {
         type: 'INVOICE',
@@ -136,7 +137,7 @@ async function main(argv = process.argv) {
         items: [
           {
             description: `${name} Family`,
-            amount: 100000,
+            amount: Math.round(100000 / splitExpenseCount),
           },
         ],
         description: `${name} Family`,
@@ -162,7 +163,11 @@ async function main(argv = process.argv) {
       },
     };
 
-    console.log(`Creating Expense ${variables.expense.description} ${!options.run ? '(dry run)' : ''}`);
+    console.log(
+      `Creating Expense ${baseVariables.expense.description}${
+        splitExpenseCount > 1 ? ` in ${splitExpenseCount} parts ` : ''
+      } ${!options.run ? '(dry run)' : ''}`,
+    );
 
     if (options.run) {
       if (cardToken === 'fake-token' || !cardToken) {
@@ -170,9 +175,19 @@ async function main(argv = process.argv) {
       }
 
       try {
-        const result = await request(endpoint, createExpenseMutation, variables);
-        console.log(`Success! https://opencollective.com/1kproject/expenses/${result.createExpense.legacyId}`);
-        await request(endpoint, processExpenseMutation, { expenseId: result.createExpense.id, action: 'APPROVE' });
+        for (let i = 0; i < splitExpenseCount; i++) {
+          const variables = cloneDeep(baseVariables);
+          if (splitExpenseCount > 1) {
+            variables.expense.description = `${variables.expense.description} (${i + 1}/${splitExpenseCount})`;
+            if (i > 0) {
+              await sleep(12000); // Slow down for both Open Collective and Wise API Limits
+            }
+          }
+
+          const result = await request(endpoint, createExpenseMutation, variables);
+          console.log(`Success! https://opencollective.com/1kproject/expenses/${result.createExpense.legacyId}`);
+          await request(endpoint, processExpenseMutation, { expenseId: result.createExpense.id, action: 'APPROVE' });
+        }
       } catch (e) {
         console.log(e);
         continue;
@@ -190,9 +205,10 @@ const getProgram = (argv) => {
   program.exitOverride();
   program.showSuggestionAfterError();
 
-  program.argument('<string>', 'Path to the CSV file to parse.');
+  program.argument('<csvPath>', 'Path to the CSV file to parse.');
 
   program.option('--run', 'Trigger import.');
+  program.option('--split', 'Split expenses in two ($500 each). Useful to prevent bank transfer limits.');
 
   program.parse(argv);
 

@@ -10,7 +10,12 @@ const endpoint = `${process.env.API_URL}/graphql/v2/${process.env.API_KEY}`;
 
 const expensesQuery = gql`
   query {
-    expenses(account: { slug: "1kproject" }, limit: 1000, status: APPROVED) {
+    expenses(
+      account: { slug: "1kproject" }
+      limit: 1000
+      status: APPROVED
+      orderBy: { field: CREATED_AT, direction: ASC }
+    ) {
       totalCount
       nodes {
         id
