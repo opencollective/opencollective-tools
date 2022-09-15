@@ -46,6 +46,10 @@ Check any warning before proceeding, if there is a problem remove the entries fr
 
 `node 1kproject/create-expenses.js Bulk_07_21.csv --run`
 
+Note: Add `--split` parameter to the above command to split the expense into two ($500 each):
+
+`node 1kproject/create-expenses.js Bulk_07_21.csv --split --run`
+
 4. Trigger the dry run for Expense Payment with:
 
 `node 1kproject/pay-expenses.js`
