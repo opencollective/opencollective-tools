@@ -5,8 +5,15 @@
 1. Add an API Key (Personal Token) and production API URL in a `.env` file.
 
 ```
+# For 1k project scripts
 API_KEY=XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 API_URL=https://api.opencollective.com
+
+# For Slack scripts
+# Secrets available on: https://api.slack.com/apps/A04249P7C0N/oauth
+SLACK_SIGNING_SECRET=XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+SLACK_BOT_TOKEN=XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+SLACK_USER_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
 2. Run `npm install`
