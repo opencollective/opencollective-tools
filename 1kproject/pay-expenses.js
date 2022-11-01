@@ -98,8 +98,9 @@ async function main(argv = process.argv) {
       } catch (e) {
         if (e.message.includes('Two-factor authentication')) {
           tfaPrompt = await prompt.get({ name: 'tfa', description: '2FA Code' });
-          variables.paymentParams.twoFactorAuthenticatorCode = tfaPrompt.tfa;
-          result = await request(endpoint, payExpenseMutation, variables);
+          result = await request(endpoint, payExpenseMutation, variables, {
+            'x-two-factor-authentication': `totp ${tfaPrompt.tfa}`,
+          });
         } else {
           throw e;
         }
