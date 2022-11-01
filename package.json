@@ -13,8 +13,8 @@
   },
   "scripts": {
     "graphql:update": "npm-run-all graphql:updateV1 graphql:updateV2",
-    "graphql:updateV1": "curl https://raw.githubusercontent.com/opencollective/opencollective-frontend/main/lib/graphql/schema.graphql --output schemaV1.graphql && prettier schemaV1.graphql --write",
-    "graphql:updateV2": "curl https://raw.githubusercontent.com/opencollective/opencollective-frontend/main/lib/graphql/schemaV2.graphql --output schemaV2.graphql && prettier schemaV2.graphql --write",
+    "graphql:updateV1": "curl https://raw.githubusercontent.com/opencollective/opencollective-api/main/server/graphql/schemaV1.graphql --output schemaV1.graphql && prettier schemaV1.graphql --write",
+    "graphql:updateV2": "curl https://raw.githubusercontent.com/opencollective/opencollective-api/main/server/graphql/schemaV2.graphql --output schemaV2.graphql && prettier schemaV2.graphql --write",
     "lint": "eslint \"*.js\"",
     "lint:fix": "npm run lint -- --fix",
     "lint:quiet": "npm run lint -- --quiet",
