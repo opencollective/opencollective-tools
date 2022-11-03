@@ -158,6 +158,7 @@ async function main(argv = process.argv) {
             },
             currency: 'UAH',
             accountHolderName: name,
+            isSaved: false
           },
         },
       },
