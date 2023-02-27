@@ -8,6 +8,7 @@ const { Command } = require('commander');
 const csvParseSync = require('csv-parse/sync'); // eslint-disable-line node/no-missing-require
 
 const { request, gql } = require('graphql-request');
+const prompt = require("prompt");
 
 const endpoint = `${process.env.API_URL}/graphql/v2/${process.env.API_KEY}`;
 const WISE_API_URL = process.env.TRANSFERWISE_API_URL || 'https://api.transferwise.com';
@@ -170,6 +171,7 @@ async function main(argv = process.argv) {
       } ${!options.run ? '(dry run)' : ''}`,
     );
 
+    let tfaPrompt;
     if (options.run) {
       if (cardToken === 'fake-token' || !cardToken) {
         throw new Error('Test card passed to run, aborting...');
@@ -187,7 +189,19 @@ async function main(argv = process.argv) {
 
           const result = await request(endpoint, createExpenseMutation, variables);
           console.log(`Success! https://opencollective.com/1kproject/expenses/${result.createExpense.legacyId}`);
-          await request(endpoint, processExpenseMutation, { expenseId: result.createExpense.id, action: 'APPROVE' });
+          try {
+            await request(endpoint, processExpenseMutation, { expenseId: result.createExpense.id, action: 'APPROVE' });
+          } catch (e) {
+            if (e.message.includes('Two-factor authentication')) {
+              tfaPrompt = await prompt.get({ name: 'tfa', description: '2FA Code' });
+              await request(endpoint, processExpenseMutation, { expenseId: result.createExpense.id, action: 'APPROVE' }, {
+                'x-two-factor-authentication': `totp ${tfaPrompt.tfa}`,
+              });
+            } else {
+              throw e;
+            }
+            tfaPrompt = null;
+          }
         }
       } catch (e) {
         console.log(e);
