@@ -8,7 +8,7 @@ const { Command } = require('commander');
 const csvParseSync = require('csv-parse/sync'); // eslint-disable-line node/no-missing-require
 
 const { request, gql } = require('graphql-request');
-const prompt = require("prompt");
+const prompt = require('prompt');
 
 const endpoint = `${process.env.API_URL}/graphql/v2/${process.env.API_KEY}`;
 const WISE_API_URL = process.env.TRANSFERWISE_API_URL || 'https://api.transferwise.com';
@@ -144,6 +144,7 @@ async function main(argv = process.argv) {
         description: `${name} Family`,
         payoutMethod: {
           type: 'BANK_ACCOUNT',
+          isSaved: false,
           data: {
             type: 'CARD',
             details: {
@@ -159,7 +160,6 @@ async function main(argv = process.argv) {
             },
             currency: 'UAH',
             accountHolderName: name,
-            isSaved: false
           },
         },
       },
@@ -194,9 +194,14 @@ async function main(argv = process.argv) {
           } catch (e) {
             if (e.message.includes('Two-factor authentication')) {
               tfaPrompt = await prompt.get({ name: 'tfa', description: '2FA Code' });
-              await request(endpoint, processExpenseMutation, { expenseId: result.createExpense.id, action: 'APPROVE' }, {
-                'x-two-factor-authentication': `totp ${tfaPrompt.tfa}`,
-              });
+              await request(
+                endpoint,
+                processExpenseMutation,
+                { expenseId: result.createExpense.id, action: 'APPROVE' },
+                {
+                  'x-two-factor-authentication': `totp ${tfaPrompt.tfa}`,
+                },
+              );
             } else {
               throw e;
             }
