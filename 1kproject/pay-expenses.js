@@ -5,6 +5,7 @@ const prompt = require('prompt');
 const { Command } = require('commander');
 
 const { request, gql } = require('graphql-request');
+const { addSharedOptionsToProgram, get2FAHeadersFromPrompt } = require('./lib');
 
 const endpoint = `${process.env.API_URL}/graphql/v2/${process.env.API_KEY}`;
 
@@ -56,7 +57,6 @@ async function main(argv = process.argv) {
   const program = getProgram(argv);
   const options = program.opts();
 
-  let tfaPrompt;
   prompt.start();
 
   if (!options.run) {
@@ -97,14 +97,11 @@ async function main(argv = process.argv) {
         result = await request(endpoint, payExpenseMutation, variables);
       } catch (e) {
         if (e.message.includes('Two-factor authentication')) {
-          tfaPrompt = await prompt.get({ name: 'tfa', description: '2FA Code' });
-          result = await request(endpoint, payExpenseMutation, variables, {
-            'x-two-factor-authentication': `totp ${tfaPrompt.tfa}`,
-          });
+          const headers = await get2FAHeadersFromPrompt(options);
+          result = await request(endpoint, payExpenseMutation, variables, headers);
         } else {
           throw e;
         }
-        tfaPrompt = null;
       }
 
       console.log(result);
@@ -117,7 +114,7 @@ const getProgram = (argv) => {
   program.exitOverride();
   program.showSuggestionAfterError();
 
-  program.option('--run', 'Trigger import.');
+  addSharedOptionsToProgram(program);
 
   program.parse(argv);
 

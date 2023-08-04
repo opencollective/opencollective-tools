@@ -34,6 +34,8 @@ If you see:
 
 To run the scripts, you need to be an admin of https://opencollective.com/ukrainian-families-1k and https://opencollective.com/foundation. Ask someone to invite you beforehand if necessary.
 
+All scripts support the `--yubikey` option to use a yubikey instead of TOTP for 2FA.
+
 1. Download the CSV file and name it with a shorter name like `Bulk_07_21.csv`
 
 2. Launch the dry run for Expense Creation with:
