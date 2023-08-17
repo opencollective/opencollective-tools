@@ -8,7 +8,7 @@ const { Command } = require('commander');
 const csvParseSync = require('csv-parse/sync'); // eslint-disable-line node/no-missing-require
 
 const { request, gql } = require('graphql-request');
-const prompt = require('prompt');
+const { addSharedOptionsToProgram, get2FAHeadersFromPrompt } = require('./lib');
 
 const endpoint = `${process.env.API_URL}/graphql/v2/${process.env.API_KEY}`;
 const WISE_API_URL = process.env.TRANSFERWISE_API_URL || 'https://api.transferwise.com';
@@ -105,7 +105,10 @@ async function main(argv = process.argv) {
     const match = allExpenses.find((expense) => JSON.stringify(expense).includes(name));
     if (match) {
       // console.log(`Skipping for ${name} ${!options.run ? '(dry run)' : ''}`);
-      console.log(`Warning! Existing expense: https://opencollective.com/1kproject/expenses/${match.legacyId}`);
+      console.log(
+        `Warning! Existing expense: https://opencollective.com/1kproject/expenses/${match.legacyId}. Skipping...`,
+      );
+      continue;
     }
 
     let cardToken = 'fake-token';
@@ -171,7 +174,6 @@ async function main(argv = process.argv) {
       } ${!options.run ? '(dry run)' : ''}`,
     );
 
-    let tfaPrompt;
     if (options.run) {
       if (cardToken === 'fake-token' || !cardToken) {
         throw new Error('Test card passed to run, aborting...');
@@ -193,19 +195,16 @@ async function main(argv = process.argv) {
             await request(endpoint, processExpenseMutation, { expenseId: result.createExpense.id, action: 'APPROVE' });
           } catch (e) {
             if (e.message.includes('Two-factor authentication')) {
-              tfaPrompt = await prompt.get({ name: 'tfa', description: '2FA Code' });
+              const headers = await get2FAHeadersFromPrompt(options);
               await request(
                 endpoint,
                 processExpenseMutation,
                 { expenseId: result.createExpense.id, action: 'APPROVE' },
-                {
-                  'x-two-factor-authentication': `totp ${tfaPrompt.tfa}`,
-                },
+                headers,
               );
             } else {
               throw e;
             }
-            tfaPrompt = null;
           }
         }
       } catch (e) {
@@ -227,8 +226,8 @@ const getProgram = (argv) => {
 
   program.argument('<csvPath>', 'Path to the CSV file to parse.');
 
-  program.option('--run', 'Trigger import.');
-  program.option('--split', 'Split expenses in two ($500 each). Useful to prevent bank transfer limits.');
+  addSharedOptionsToProgram(program);
+  program.option('--split', 'Split expenses in two ($500 each). Useful to prevent bank transfer limits.', true);
 
   program.parse(argv);
 
