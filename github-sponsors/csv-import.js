@@ -77,6 +77,7 @@ async function fetchCollectiveWithSlug(slug) {
   }
 }
 
+/*
 async function getFxRate(from, to, date = 'latest') {
   const params = {
     access_key: process.env.FIXER_ACCESS_KEY, // eslint-disable-line camelcase
@@ -115,6 +116,7 @@ async function getAmountInCurrency(amount, currency, date) {
 
   return { value: parseFloat(amount.value * fxRate).toFixed(2), currency };
 }
+*/
 
 async function main(argv = process.argv) {
   const program = getProgram(argv);
@@ -131,7 +133,7 @@ async function main(argv = process.argv) {
 
   for (const record of records) {
     const organization = record['organization'];
-    const payoutDate = record['payout date'];
+    // const payoutDate = record['payout date'];
 
     let collective;
 
@@ -155,6 +157,14 @@ async function main(argv = process.argv) {
       continue;
     }
 
+    if (collective.host.currency !== collective.currency) {
+      console.warn(`Currency mismatch for ${organization} (${collective.host.currency} !== ${collective.currency})`);
+      continue;
+    }
+
+    const amount = { value: record['amount'], currency: collective.host.currency };
+
+    /*
     let amount;
     if (collective.host.currency === 'USD') {
       const processedAmountKey = Object.keys(record).find((key) => key.match(/processed amount/i));
@@ -163,8 +173,8 @@ async function main(argv = process.argv) {
     } else {
       amount = { value: record['amount'], currency: collective.host.currency };
     }
-
     amount = await getAmountInCurrency(amount, collective.currency, payoutDate);
+    */
 
     const variables = {
       fromAccount: { slug: 'github-sponsors' },
