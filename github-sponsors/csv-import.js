@@ -23,6 +23,7 @@ const collectiveQuery = gql`
       host {
         id
         slug
+        currency
       }
       currency
       hostFeePercent
@@ -91,25 +92,28 @@ async function getFxRate(from, to, date = 'latest') {
 const fxRates = new Map();
 
 async function getAmountInCurrency(amount, currency, date) {
-  if (currency === 'USD') {
-    return { amount, currency };
+  if (amount.currency === currency) {
+    return amount;
   }
 
-  if (!fxRates[currency]) {
-    fxRates[currency] = new Map();
+  if (!fxRates[amount.currency]) {
+    fxRates[amount.currency] = new Map();
+  }
+  if (!fxRates[amount.currency][currency]) {
+    fxRates[amount.currency][currency] = new Map();
   }
 
-  let fxRate = fxRates[currency][date];
+  let fxRate = fxRates[amount.currency][currency][date];
   if (!fxRate) {
-    const fixerFxRate = await getFxRate('USD', currency, date);
+    const fixerFxRate = await getFxRate(amount.currency, currency, date);
     if (!fixerFxRate) {
       throw new Error('Could not fetch fxRate from fixer');
     }
-    console.log(`Using ${fixerFxRate} as USD -> ${currency} fxRate on ${date}`);
-    fxRate = fxRates[currency][date] = fixerFxRate;
+    console.log(`Using ${fixerFxRate} as ${amount.currency} -> ${currency} fxRate on ${date}`);
+    fxRate = fxRates[amount.currency][currency][date] = fixerFxRate;
   }
 
-  return { amount: parseFloat(amount * fxRate).toFixed(2), currency };
+  return { value: parseFloat(amount.value * fxRate).toFixed(2), currency };
 }
 
 async function main(argv = process.argv) {
@@ -128,9 +132,6 @@ async function main(argv = process.argv) {
   for (const record of records) {
     const organization = record['organization'];
     const payoutDate = record['payout date'];
-
-    const processedAmountKey = Object.keys(record).find((key) => key.match(/processed amount/i));
-    const amount = parseFloat(record[processedAmountKey].replace('$', '').replace(',', ''));
 
     let collective;
 
@@ -154,18 +155,27 @@ async function main(argv = process.argv) {
       continue;
     }
 
-    collective.currency = 'EUR';
+    let amount;
+    if (collective.host.currency === 'USD') {
+      const processedAmountKey = Object.keys(record).find((key) => key.match(/processed amount/i));
+      const processedAmountValue = parseFloat(record[processedAmountKey].replace('$', '').replace(',', ''));
+      amount = { value: processedAmountValue, currency: 'USD' };
+    } else {
+      amount = { value: record['amount'], currency: collective.host.currency };
+    }
+
+    amount = await getAmountInCurrency(amount, collective.currency, payoutDate);
 
     const variables = {
       fromAccount: { slug: 'github-sponsors' },
       account: { slug: collective.slug },
-      amount: getAmountInCurrency(amount, collective.currency, payoutDate),
+      amount: amount,
       description: 'GitHub Sponsors payment',
       hostFeePercent: collective.hostFeePercent,
     };
 
     console.log(
-      `Adding ${amount} ${collective.currency} to ${collective.slug} with ${collective.hostFeePercent}% host fee ${
+      `Adding ${amount.value} ${amount.currency} to ${collective.slug} with ${collective.hostFeePercent}% host fee ${
         !options.run ? '(dry run)' : ''
       }`,
     );
