@@ -133,7 +133,6 @@ async function main(argv = process.argv) {
 
   for (const record of records) {
     const organization = record['organization'];
-    // const payoutDate = record['payout date'];
 
     let collective;
 
@@ -173,7 +172,7 @@ async function main(argv = process.argv) {
     } else {
       amount = { value: record['amount'], currency: collective.host.currency };
     }
-    amount = await getAmountInCurrency(amount, collective.currency, payoutDate);
+    amount = await getAmountInCurrency(amount, collective.currency, record['payout date']);
     */
 
     const variables = {
