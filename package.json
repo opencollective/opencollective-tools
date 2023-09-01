@@ -23,6 +23,7 @@
     "prettier:write": "npm run prettier -- --write"
   },
   "dependencies": {
+    "@slack/bolt": "^3.12.2",
     "axios": "^0.26.1",
     "commander": "^8.3.0",
     "csv-parse": "^5.0.4",
@@ -40,7 +41,6 @@
     "eslint": "^8.8.0",
     "eslint-config-opencollective": "^3.0.3",
     "eslint-plugin-babel": "^5.3.1",
-    "eslint-plugin-graphql": "^4.0.0",
     "eslint-plugin-import": "^2.25.4",
     "eslint-plugin-node": "^11.1.0",
     "eslint-plugin-react": "^7.28.0",

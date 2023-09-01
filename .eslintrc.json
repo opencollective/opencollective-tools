@@ -1,14 +1,9 @@
 {
   "extends": ["opencollective"],
   "parser": "@babel/eslint-parser",
-  "plugins": ["graphql", "simple-import-sort"],
+  "plugins": ["simple-import-sort"],
   "rules": {
     "no-process-exit": "off",
-    "graphql/template-strings": [
-      "error",
-      { "env": "apollo", "tagName": "gqlV1", "projectName": "opencollective_v1" },
-      { "env": "apollo", "projectName": "opencollective_v2" }
-    ],
     "simple-import-sort/imports": [
       "error",
       {
