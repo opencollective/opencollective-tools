@@ -62,7 +62,7 @@ async function main(argv = process.argv) {
   }
 
   if (isInPrivateChannels) {
-    console.log('Done! Remember to remove the person from slack/check-members.js too!');
+    console.log('Done!');
   } else {
     console.log(`@${user.name} (${user.real_name}) is not in any private channel`);
   }
