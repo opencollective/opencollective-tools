@@ -11,6 +11,8 @@ const mapping = require('./csv-import-mapping.json');
 
 const endpoint = `${process.env.API_URL}/graphql/v2/${process.env.API_KEY}`;
 
+const supportedHosts = ['opensource', 'europe'];
+
 const collectiveQuery = gql`
   query Collective($slug: String, $githubHandle: String) {
     collective(githubHandle: $githubHandle, slug: $slug) {
@@ -21,7 +23,10 @@ const collectiveQuery = gql`
       host {
         id
         slug
+        currency
       }
+      currency
+      hostFeePercent
     }
   }
 `;
@@ -58,17 +63,60 @@ const catchException = () => {
 
 async function fetchCollectiveWithGithubHandle(githubHandle) {
   const dataWithGithubHandle = await request(endpoint, collectiveQuery, { githubHandle }).catch(catchException);
-  if (dataWithGithubHandle && dataWithGithubHandle.collective.host?.slug === 'opensource') {
+  const hostSlug = dataWithGithubHandle?.collective.host?.slug;
+  if (dataWithGithubHandle && supportedHosts.includes(hostSlug)) {
     return dataWithGithubHandle.collective;
   }
 }
 
 async function fetchCollectiveWithSlug(slug) {
   const dataWithSlug = await request(endpoint, collectiveQuery, { slug }).catch(catchException);
-  if (dataWithSlug && dataWithSlug.collective.host?.slug === 'opensource') {
+  const hostSlug = dataWithSlug?.collective.host?.slug;
+  if (dataWithSlug && supportedHosts.includes(hostSlug)) {
     return dataWithSlug.collective;
   }
 }
+
+/*
+async function getFxRate(from, to, date = 'latest') {
+  const params = {
+    access_key: process.env.FIXER_ACCESS_KEY, // eslint-disable-line camelcase
+    base: from,
+    symbols: to,
+  };
+
+  const result = await fetch(`https://data.fixer.io/${date}?${new URLSearchParams(params)}`).then((res) => res.json());
+
+  return result?.rates?.[to];
+}
+
+const fxRates = new Map();
+
+async function getAmountInCurrency(amount, currency, date) {
+  if (amount.currency === currency) {
+    return amount;
+  }
+
+  if (!fxRates[amount.currency]) {
+    fxRates[amount.currency] = new Map();
+  }
+  if (!fxRates[amount.currency][currency]) {
+    fxRates[amount.currency][currency] = new Map();
+  }
+
+  let fxRate = fxRates[amount.currency][currency][date];
+  if (!fxRate) {
+    const fixerFxRate = await getFxRate(amount.currency, currency, date);
+    if (!fixerFxRate) {
+      throw new Error('Could not fetch fxRate from fixer');
+    }
+    console.log(`Using ${fixerFxRate} as ${amount.currency} -> ${currency} fxRate on ${date}`);
+    fxRate = fxRates[amount.currency][currency][date] = fixerFxRate;
+  }
+
+  return { value: parseFloat(amount.value * fxRate).toFixed(2), currency };
+}
+*/
 
 async function main(argv = process.argv) {
   const program = getProgram(argv);
@@ -85,7 +133,6 @@ async function main(argv = process.argv) {
 
   for (const record of records) {
     const organization = record['organization'];
-    const amount = parseFloat(record['processed amount'].replace('$', '').replace(',', ''));
 
     let collective;
 
@@ -109,15 +156,38 @@ async function main(argv = process.argv) {
       continue;
     }
 
+    if (collective.host.currency !== collective.currency) {
+      console.warn(`Currency mismatch for ${organization} (${collective.host.currency} !== ${collective.currency})`);
+      continue;
+    }
+
+    const amount = { value: record['amount'], currency: collective.host.currency };
+
+    /*
+    let amount;
+    if (collective.host.currency === 'USD') {
+      const processedAmountKey = Object.keys(record).find((key) => key.match(/processed amount/i));
+      const processedAmountValue = parseFloat(record[processedAmountKey].replace('$', '').replace(',', ''));
+      amount = { value: processedAmountValue, currency: 'USD' };
+    } else {
+      amount = { value: record['amount'], currency: collective.host.currency };
+    }
+    amount = await getAmountInCurrency(amount, collective.currency, record['payout date']);
+    */
+
     const variables = {
       fromAccount: { slug: 'github-sponsors' },
       account: { slug: collective.slug },
-      amount: { value: amount, currency: 'USD' },
+      amount: amount,
       description: 'GitHub Sponsors payment',
-      hostFeePercent: 10,
+      hostFeePercent: collective.hostFeePercent,
     };
 
-    console.log(`Adding $${amount} to ${collective.slug} ${!options.run ? '(dry run)' : ''}`);
+    console.log(
+      `Adding ${amount.value} ${amount.currency} to ${collective.slug} with ${collective.hostFeePercent}% host fee ${
+        !options.run ? '(dry run)' : ''
+      }`,
+    );
 
     // Poor man rate-limiting (100 req / minute max on the API)
     await sleep(600);
