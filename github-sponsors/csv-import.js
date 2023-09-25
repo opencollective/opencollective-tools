@@ -61,6 +61,10 @@ const catchException = () => {
   return null;
 };
 
+const parseAmount = (string) => {
+  return parseFloat(string.replace('$', '').replace('€', '').replace(',', ''));
+};
+
 async function fetchCollectiveWithGithubHandle(githubHandle) {
   const dataWithGithubHandle = await request(endpoint, collectiveQuery, { githubHandle }).catch(catchException);
   const hostSlug = dataWithGithubHandle?.collective.host?.slug;
@@ -161,7 +165,7 @@ async function main(argv = process.argv) {
       continue;
     }
 
-    const amount = { value: record['amount'], currency: collective.host.currency };
+    const amount = { value: parseAmount(record['amount']), currency: collective.host.currency };
 
     /*
     let amount;
