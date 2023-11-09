@@ -26,7 +26,7 @@ const collectiveQuery = gql`
         currency
       }
       currency
-      hostFeePercent
+      addedFundsHostFeePercent: hostFeePercent(paymentMethodType: HOST)
     }
   }
 `;
@@ -183,14 +183,14 @@ async function main(argv = process.argv) {
       fromAccount: { slug: 'github-sponsors' },
       account: { slug: collective.slug },
       amount: amount,
-      description: 'GitHub Sponsors payment',
-      hostFeePercent: collective.hostFeePercent,
+      description: options.description,
+      hostFeePercent: collective.addedFundsHostFeePercent,
     };
 
     console.log(
-      `Adding ${amount.value} ${amount.currency} to ${collective.slug} with ${collective.hostFeePercent}% host fee ${
-        !options.run ? '(dry run)' : ''
-      }`,
+      `Adding ${amount.value} ${amount.currency} to https://opencollective.com/${collective.slug} with ${
+        collective.addedFundsHostFeePercent
+      }% host fee and description "${options.description}" ${!options.run ? '(dry run)' : ''}`,
     );
 
     // Poor man rate-limiting (100 req / minute max on the API)
@@ -212,6 +212,8 @@ const getProgram = (argv) => {
   program.argument('<string>', 'Path to the CSV file to parse.');
 
   program.option('--run', 'Trigger import.');
+
+  program.option('--description <description>', 'The description for the payment', 'GitHub Sponsors Contributions');
 
   program.parse(argv);
 
