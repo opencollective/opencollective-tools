@@ -18,7 +18,7 @@ debug.enable(process.env.DEBUG);
 
 const defaults = {
   NODE_ENV: 'development',
-  API_KEY: '723839d669cbbe019cfce6a2c2e229371fc5b280',
+  API_KEY: 'XXXXXXXXXXXXXXXXXXXXXXXXXX',
   API_URL: 'https://api.opencollective.com',
   OC_APPLICATION: 'tools',
   OC_ENV: process.env.NODE_ENV || 'development',
