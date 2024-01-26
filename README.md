@@ -2,11 +2,11 @@
 
 ## Prerequisite
 
-1. Add an API Key (Personal Token) and production API URL in a `.env` file.
+1. Add a Personal Token (API Key) and production API URL in a `.env` file.
 
 ```
-# For 1k project scripts
-API_KEY=XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+# For GitHub Sponsors AND 1kproject scripts
+PERSONAL_TOKEN=XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 API_URL=https://api.opencollective.com
 
 # For Slack scripts

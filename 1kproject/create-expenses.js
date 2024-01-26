@@ -10,7 +10,9 @@ const csvParseSync = require('csv-parse/sync'); // eslint-disable-line node/no-m
 const { request, gql } = require('graphql-request');
 const { addSharedOptionsToProgram, get2FAHeadersFromPrompt } = require('./lib');
 
-const endpoint = `${process.env.API_URL}/graphql/v2/${process.env.API_KEY}`;
+const endpoint = process.env.PERSONAL_TOKEN
+  ? `${process.env.API_URL}/graphql?personalToken=${process.env.PERSONAL_TOKEN}`
+  : `${process.env.API_URL}/graphql/${process.env.API_KEY}`;
 const WISE_API_URL = process.env.TRANSFERWISE_API_URL || 'https://api.transferwise.com';
 
 const expensesQuery = gql`
