@@ -9,7 +9,9 @@ const { request, gql } = require('graphql-request');
 
 const mapping = require('./csv-import-mapping.json');
 
-const endpoint = `${process.env.API_URL}/graphql/v2/${process.env.API_KEY}`;
+const endpoint = process.env.PERSONAL_TOKEN
+  ? `${process.env.API_URL}/graphql?personalToken=${process.env.PERSONAL_TOKEN}`
+  : `${process.env.API_URL}/graphql/${process.env.API_KEY}`;
 
 const supportedHosts = ['opensource', 'europe'];
 
