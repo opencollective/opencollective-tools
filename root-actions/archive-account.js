@@ -4,9 +4,13 @@ const { Command } = require('commander');
 
 const { request, gql } = require('graphql-request');
 
-const endpoint = `${process.env.API_URL}/graphql/v2/${process.env.API_KEY}`;
+const endpoint = process.env.PERSONAL_TOKEN
+  ? `${process.env.API_URL}/graphql?personalToken=${process.env.PERSONAL_TOKEN}`
+  : `${process.env.API_URL}/graphql/${process.env.API_KEY}`;
 
-const endpointV1 = `${process.env.API_URL}/graphql/v1/${process.env.API_KEY}`;
+const endpointV1 = process.env.PERSONAL_TOKEN
+  ? `${process.env.API_URL}/graphql/v1?personalToken=${process.env.PERSONAL_TOKEN}`
+  : `${process.env.API_URL}/graphql/v1/${process.env.API_KEY}`;
 
 const accountQuery = gql`
   query Account($slug: String) {
