@@ -18,8 +18,8 @@ debug.enable(process.env.DEBUG);
 
 const defaults = {
   NODE_ENV: 'development',
-  API_KEY: '723839d669cbbe019cfce6a2c2e229371fc5b280',
-  API_URL: 'https://api.opencollective.com',
+  API_KEY: '09u624Pc9F47zoGLlkg1TBSbOl2ydSAq',
+  API_URL: 'https://api-staging.opencollective.com',
   OC_APPLICATION: 'tools',
   OC_ENV: process.env.NODE_ENV || 'development',
 };
