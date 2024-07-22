@@ -25,6 +25,8 @@ const getProgram = (argv) => {
   program.showSuggestionAfterError();
   program.option('--channel <channel>', 'Only analyze the given channels (comma-separated list)');
   program.option('--kick', 'Kick invalid members from channels');
+  program.option('--no-archived', 'Exclude archived channels');
+  program.option('--public', 'Include public channels');
   program.parse(argv);
   return program;
 };
@@ -58,7 +60,11 @@ async function main(argv = process.argv) {
   const allowedMembers = [...SPECIAL_MEMBERS, ...adminMembers];
 
   // List all private channels in the workspace
-  let { channels } = await slackApp.client.conversations.list({ types: 'private_channel' });
+  let { channels } = await slackApp.client.conversations.list({
+    types: options.public ? 'public_channel,private_channel' : 'private_channel',
+    exclude_archived: !options.archived,
+    limit: 1000,
+  });
   if (options.channel) {
     const channelNames = options.channel.split(',');
     channels = channels.filter((c) => channelNames.includes(c.name));
@@ -67,7 +73,7 @@ async function main(argv = process.argv) {
   // Link members with the channel
   await Promise.all(
     channels.map(async (channel) => {
-      const { members } = await slackApp.client.conversations.members({ channel: channel.id });
+      const { members } = await slackApp.client.conversations.members({ channel: channel.id, limit: 1000 });
       channel.members = members;
     }),
   );
@@ -106,7 +112,7 @@ async function main(argv = process.argv) {
         `#${channel.name} (${channel.id}) has ${invalidMemberProfiles.length} invalid members${
           externalMemberProfiles
             ? ` and ${externalMemberProfiles.length} external members (${externalMemberProfiles
-                .map((p) => p.name)
+                .map((p) => formatUserName(p))
                 .join(', ')})`
             : ''
         }`,
@@ -122,7 +128,7 @@ async function main(argv = process.argv) {
             await slackApp.client.conversations.kick({ channel: channel.id, user: invalidMember.id });
             process.stdout.write(' => [KICKED]\n');
           } catch (e) {
-            process.stdout.write('=> [ERROR]\n');
+            process.stdout.write(`=> [ERROR] Kicking failed for ${formatUserName(invalidMember)}\n`);
             console.error(e);
           }
         }
