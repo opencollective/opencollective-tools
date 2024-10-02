@@ -59,16 +59,12 @@ const sleep = (ms) => {
   });
 };
 
-const catchException = () => {
-  return null;
-};
-
 const parseAmount = (string) => {
   return parseFloat(string.replace('$', '').replace('€', '').replace(',', ''));
 };
 
 async function fetchCollectiveWithGithubHandle(githubHandle) {
-  const dataWithGithubHandle = await request(endpoint, collectiveQuery, { githubHandle }).catch(catchException);
+  const dataWithGithubHandle = await request(endpoint, collectiveQuery, { githubHandle });
   const hostSlug = dataWithGithubHandle?.collective.host?.slug;
   if (dataWithGithubHandle && supportedHosts.includes(hostSlug)) {
     return dataWithGithubHandle.collective;
@@ -76,7 +72,7 @@ async function fetchCollectiveWithGithubHandle(githubHandle) {
 }
 
 async function fetchCollectiveWithSlug(slug) {
-  const dataWithSlug = await request(endpoint, collectiveQuery, { slug }).catch(catchException);
+  const dataWithSlug = await request(endpoint, collectiveQuery, { slug });
   const hostSlug = dataWithSlug?.collective.host?.slug;
   if (dataWithSlug && supportedHosts.includes(hostSlug)) {
     return dataWithSlug.collective;
@@ -142,21 +138,31 @@ async function main(argv = process.argv) {
 
     let collective;
 
-    if (mapping[organization]) {
-      collective = await fetchCollectiveWithSlug(mapping[organization]);
-    }
-    if (!collective) {
-      collective = await fetchCollectiveWithGithubHandle(organization);
-      if (collective) {
-        console.warn(`Detected a new Collective through githubHandle "${organization}": "${collective.slug}"`);
+    try {
+      if (mapping[organization]) {
+        collective = await fetchCollectiveWithSlug(mapping[organization]);
       }
-    }
-    if (!collective) {
-      collective = await fetchCollectiveWithSlug(organization);
-      if (collective) {
-        console.warn(`Detected a new Collective through slug "${organization}": "${collective.slug}"`);
+      if (!collective) {
+        collective = await fetchCollectiveWithGithubHandle(organization);
+        if (collective) {
+          console.warn(`Detected a new Collective through githubHandle "${organization}": "${collective.slug}"`);
+        }
       }
+      if (!collective) {
+        collective = await fetchCollectiveWithSlug(organization);
+        if (collective) {
+          console.warn(`Detected a new Collective through slug "${organization}": "${collective.slug}"`);
+        }
+      }
+    } catch (err) {
+      if (err.response?.error?.message) {
+        console.warn(`Error with Open Collective API request. ${err.response?.error?.message}`);
+      } else {
+        console.log(err);
+      }
+      continue;
     }
+
     if (!collective) {
       console.warn(`Error finding a matching Collective for GitHub Organization ${organization}`);
       continue;
