@@ -309,6 +309,7 @@
   "SeleniumHQ": "selenium",
   "servo": "servo",
   "sequelize": "sequelize",
+  "SFML": "sfml",
   "sinonjs": "sinon",
   "sirixdb": "sirixdb",
   "SixLabors": "sixlabors",
