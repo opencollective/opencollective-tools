@@ -24,9 +24,11 @@ const getProgram = (argv) => {
   program.exitOverride();
   program.showSuggestionAfterError();
   program.option('--channel <channel>', 'Only analyze the given channels (comma-separated list)');
+  program.option('--without-channel <channel>', 'Exclude the given channels (comma-separated list)');
   program.option('--kick', 'Kick invalid members from channels');
   program.option('--no-archived', 'Exclude archived channels');
   program.option('--public', 'Include public channels');
+  program.option('--check-shared', 'Check shared channels');
   program.parse(argv);
   return program;
 };
@@ -46,7 +48,46 @@ const INTERNAL_GROUPS = [
   'S0523QPE4NP', // OCNZ
 ];
 
+const SPECIAL_CHANNEL_PERMISSIONS = {
+  // #giftcollective
+  C038K66K28G: [{ type: 'group', id: 'S059LJ4MVRV' }], // @gc-team (Gift Collective)
+  // #nz-internal
+  C02KZJE04JK: [{ type: 'group', id: 'S059LJ4MVRV' }], // @gc-team (Gift Collective)
+  // #admin-workspace
+  GSNDVCC4F: [{ type: 'group', id: 'S059LJ4MVRV' }],
+  // # e2c-internal
+  C035KVAPLTZ: [
+    // Liam
+    { type: 'user', id: 'U03ET5WS8MS' },
+    // Melinda
+    { type: 'user', id: 'U03SZQBPRPX' },
+  ],
+};
+
 const userProfileCache = {};
+
+function getChannelSpecialAllowedMembers(channelId, usergroups) {
+  const channelSpecialPermissions = SPECIAL_CHANNEL_PERMISSIONS[channelId] || [];
+  if (!channelSpecialPermissions.length) {
+    return [];
+  }
+
+  const allowedMembers = [];
+  for (const permission of channelSpecialPermissions) {
+    if (permission.type === 'group') {
+      const group = usergroups.find((g) => g.id === permission.id);
+      if (group) {
+        allowedMembers.push(...group.users);
+      } else {
+        console.warn(`Group ${permission.id} not found`);
+      }
+    } else if (permission.type === 'user') {
+      allowedMembers.push(permission.id);
+    }
+  }
+
+  return allowedMembers;
+}
 
 async function main(argv = process.argv) {
   const program = getProgram(argv);
@@ -69,6 +110,10 @@ async function main(argv = process.argv) {
     const channelNames = options.channel.split(',');
     channels = channels.filter((c) => channelNames.includes(c.name));
   }
+  if (options.withoutChannel) {
+    const channelNames = options.withoutChannel.split(',');
+    channels = channels.filter((c) => !channelNames.includes(c.name));
+  }
 
   // Link members with the channel
   await Promise.all(
@@ -82,7 +127,9 @@ async function main(argv = process.argv) {
   let hasInvalidMembers = false;
   for (const channel of channels) {
     const channelMembers = channel.members;
-    const invalidMembers = difference(channelMembers, allowedMembers);
+    const specialMembers = getChannelSpecialAllowedMembers(channel.id, usergroups);
+    const channelAllowedMembers = [...allowedMembers, ...specialMembers];
+    const invalidMembers = difference(channelMembers, channelAllowedMembers);
 
     if (invalidMembers.length > 0) {
       hasInvalidMembers = true;
@@ -102,14 +149,19 @@ async function main(argv = process.argv) {
       // For shared channels, we cannot check external members
       let externalMemberProfiles;
       if (channel.is_shared) {
+        if (!options.checkShared) {
+          continue;
+        }
+
         [invalidMemberProfiles, externalMemberProfiles] = partition(
           invalidMemberProfiles,
           (p) => p.team_id === TEAM_ID,
         );
       }
 
+      const isArchived = channel.is_archived ? ' [ARCHIVED]' : '';
       console.log(
-        `#${channel.name} (${channel.id}) has ${invalidMemberProfiles.length} invalid members${
+        `#${channel.name}${isArchived} (${channel.id}) has ${invalidMemberProfiles.length} invalid members${
           externalMemberProfiles
             ? ` and ${externalMemberProfiles.length} external members (${externalMemberProfiles
                 .map((p) => formatUserName(p))
