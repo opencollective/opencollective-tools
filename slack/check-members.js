@@ -49,6 +49,8 @@ const INTERNAL_GROUPS = [
 ];
 
 const SPECIAL_CHANNEL_PERMISSIONS = {
+  // #internal-support
+  GFH4N961L: [{ type: 'user', id: 'U056SNTUC11' }], // Wayne
   // #giftcollective
   C038K66K28G: [{ type: 'group', id: 'S059LJ4MVRV' }], // @gc-team (Gift Collective)
   // #nz-internal
@@ -116,12 +118,15 @@ async function main(argv = process.argv) {
   }
 
   // Link members with the channel
-  await Promise.all(
-    channels.map(async (channel) => {
-      const { members } = await slackApp.client.conversations.members({ channel: channel.id, limit: 1000 });
+  for (const channel of channels) {
+    const { members } = await slackApp.client.conversations.members({ channel: channel.id, limit: 1000 });
+    if (members.length > 999) {
+      console.warn(`Channel ${channel.name} has more than 1000 members, ignoring`);
+      // TODO add pagination with cursor
+    } else {
       channel.members = members;
-    }),
-  );
+    }
+  }
 
   // Check members of the channels are not part of the team
   let hasInvalidMembers = false;
