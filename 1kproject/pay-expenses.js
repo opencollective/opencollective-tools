@@ -14,7 +14,7 @@ const endpoint = process.env.PERSONAL_TOKEN
 const expensesQuery = gql`
   query {
     expenses(
-      account: { slug: "1kproject" }
+      account: { slug: "the-1k-project-for-ukraine" }
       limit: 1000
       status: APPROVED
       orderBy: { field: CREATED_AT, direction: ASC }
