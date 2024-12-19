@@ -17,7 +17,7 @@ const WISE_API_URL = process.env.TRANSFERWISE_API_URL || 'https://api.transferwi
 
 const expensesQuery = gql`
   query {
-    expenses(account: { slug: "1kproject" }, limit: 1000) {
+    expenses(account: { slug: "the-1k-project-for-ukraine" }, limit: 1000) {
       totalCount
       nodes {
         id
@@ -108,7 +108,7 @@ async function main(argv = process.argv) {
     if (match) {
       // console.log(`Skipping for ${name} ${!options.run ? '(dry run)' : ''}`);
       console.log(
-        `Warning! Existing expense: https://opencollective.com/1kproject/expenses/${match.legacyId}. Skipping...`,
+        `Warning! Existing expense: https://opencollective.com/the-1k-project-for-ukraine/expenses/${match.legacyId}. Skipping...`,
       );
       continue;
     }
@@ -135,7 +135,7 @@ async function main(argv = process.argv) {
 
     const splitExpenseCount = options.split ? 2 : 1;
     const baseVariables = {
-      account: { slug: '1kproject' },
+      account: { slug: 'the-1k-project-for-ukraine' },
       expense: {
         type: 'INVOICE',
         payee: { slug: 'ukrainian-families-1k' },
@@ -192,7 +192,7 @@ async function main(argv = process.argv) {
           }
 
           const result = await request(endpoint, createExpenseMutation, variables);
-          console.log(`Success! https://opencollective.com/1kproject/expenses/${result.createExpense.legacyId}`);
+          console.log(`Success! https://opencollective.com/the-1k-project-for-ukraine/expenses/${result.createExpense.legacyId}`);
           try {
             await request(endpoint, processExpenseMutation, { expenseId: result.createExpense.id, action: 'APPROVE' });
           } catch (e) {
