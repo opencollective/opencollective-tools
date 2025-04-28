@@ -13,7 +13,7 @@ const endpoint = process.env.PERSONAL_TOKEN
   ? `${process.env.API_URL}/graphql?personalToken=${process.env.PERSONAL_TOKEN}`
   : `${process.env.API_URL}/graphql/${process.env.API_KEY}`;
 
-const supportedHosts = ['opensource', 'europe'];
+const supportedHosts = ['opensource', 'europe', 'oce-foundation-eur'];
 
 const collectiveQuery = gql`
   query Collective($slug: String, $githubHandle: String) {
