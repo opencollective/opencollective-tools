@@ -13,7 +13,7 @@ const endpoint = process.env.PERSONAL_TOKEN
   ? `${process.env.API_URL}/graphql?personalToken=${process.env.PERSONAL_TOKEN}`
   : `${process.env.API_URL}/graphql/${process.env.API_KEY}`;
 
-const supportedHosts = ['opensource', 'europe'];
+const supportedHosts = ['opensource', 'europe', 'oce-foundation-eur'];
 
 const collectiveQuery = gql`
   query Collective($slug: String, $githubHandle: String) {
@@ -202,12 +202,12 @@ async function main(argv = process.argv) {
     );
 
     // Poor man rate-limiting (100 req / minute max on the API)
-    await sleep(600);
+    await sleep(1000);
 
     if (options.run) {
       const result = await request(endpoint, addFundsMutation, variables);
       console.log(result);
-      await sleep(600);
+      await sleep(1000);
     }
   }
 }
