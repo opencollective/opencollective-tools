@@ -202,7 +202,7 @@ async function main(argv = process.argv) {
     );
 
     // Poor man rate-limiting (100 req / minute max on the API)
-    await sleep(1000);
+    await sleep(5000);
 
     if (options.run) {
       const result = await request(endpoint, addFundsMutation, variables);
