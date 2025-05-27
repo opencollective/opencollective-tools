@@ -18,7 +18,7 @@ const supportedHosts = ['opensource', 'europe', 'oce-foundation-eur'];
 
 const collectiveQuery = gql`
   query Collective($slug: String, $githubHandle: String) {
-    collective(githubHandle: $githubHandle, slug: $slug) {
+    collective(githubHandle: $githubHandle, slug: $slug, throwIfMissing: false) {
       id
       type
       slug
@@ -69,17 +69,21 @@ const parseAmount = (string) => {
 
 async function fetchCollectiveWithGithubHandle(githubHandle) {
   const dataWithGithubHandle = await rateLimitedRequest(endpoint, collectiveQuery, { githubHandle });
-  const hostSlug = dataWithGithubHandle?.collective.host?.slug;
-  if (dataWithGithubHandle && supportedHosts.includes(hostSlug)) {
-    return dataWithGithubHandle.collective;
+  if (dataWithGithubHandle?.collective) {
+    const hostSlug = dataWithGithubHandle?.collective.host?.slug;
+    if (supportedHosts.includes(hostSlug)) {
+      return dataWithGithubHandle.collective;
+    }
   }
 }
 
 async function fetchCollectiveWithSlug(slug) {
   const dataWithSlug = await rateLimitedRequest(endpoint, collectiveQuery, { slug });
-  const hostSlug = dataWithSlug?.collective.host?.slug;
-  if (dataWithSlug && supportedHosts.includes(hostSlug)) {
-    return dataWithSlug.collective;
+  if (dataWithSlug?.collective) {
+    const hostSlug = dataWithSlug?.collective.host?.slug;
+    if (supportedHosts.includes(hostSlug)) {
+      return dataWithSlug.collective;
+    }
   }
 }
 
