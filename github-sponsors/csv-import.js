@@ -6,6 +6,7 @@ const { Command } = require('commander');
 const csvParseSync = require('csv-parse/sync'); // eslint-disable-line node/no-missing-require
 
 const { request, gql } = require('graphql-request');
+const { pRateLimit } = require('p-ratelimit');
 
 const mapping = require('./csv-import-mapping.json');
 
@@ -53,10 +54,13 @@ const addFundsMutation = gql`
   }
 `;
 
-const sleep = (ms) => {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
+const rateLimiter = pRateLimit({
+  interval: 60 * 1000, // 1 minute
+  rate: 60, // 60 calls per interval
+});
+
+const rateLimitedRequest = (endpoint, query, variables) => {
+  return rateLimiter(() => request(endpoint, query, variables));
 };
 
 const parseAmount = (string) => {
@@ -64,7 +68,7 @@ const parseAmount = (string) => {
 };
 
 async function fetchCollectiveWithGithubHandle(githubHandle) {
-  const dataWithGithubHandle = await request(endpoint, collectiveQuery, { githubHandle });
+  const dataWithGithubHandle = await rateLimitedRequest(endpoint, collectiveQuery, { githubHandle });
   const hostSlug = dataWithGithubHandle?.collective.host?.slug;
   if (dataWithGithubHandle && supportedHosts.includes(hostSlug)) {
     return dataWithGithubHandle.collective;
@@ -72,7 +76,7 @@ async function fetchCollectiveWithGithubHandle(githubHandle) {
 }
 
 async function fetchCollectiveWithSlug(slug) {
-  const dataWithSlug = await request(endpoint, collectiveQuery, { slug });
+  const dataWithSlug = await rateLimitedRequest(endpoint, collectiveQuery, { slug });
   const hostSlug = dataWithSlug?.collective.host?.slug;
   if (dataWithSlug && supportedHosts.includes(hostSlug)) {
     return dataWithSlug.collective;
@@ -201,13 +205,9 @@ async function main(argv = process.argv) {
       }% host fee and description "${options.description}" ${!options.run ? '(dry run)' : ''}`,
     );
 
-    // Poor man rate-limiting (100 req / minute max on the API)
-    await sleep(5000);
-
     if (options.run) {
-      const result = await request(endpoint, addFundsMutation, variables);
+      const result = await rateLimitedRequest(endpoint, addFundsMutation, variables);
       console.log(result);
-      await sleep(1000);
     }
   }
 }
