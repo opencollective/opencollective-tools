@@ -38,7 +38,7 @@ const getProgram = (argv) => {
   program.argument('<string>', 'The slug of the Account to export');
   program.argument('<string>', 'The export path');
   program.option('--types <string>', 'The types of expenses to export');
-  program.option('--limit', 'The number of expenses to export');
+  program.option('--limit <number>', 'The number of expenses to export');
   program.option('--run', 'Trigger export.');
   program.parse(argv);
 
@@ -69,7 +69,7 @@ async function main(argv = process.argv) {
   const program = getProgram(argv);
   const options = program.opts();
   const [slug, exportDir] = program.args;
-  const limit = options.limit ? parseInt(options.limit) : 500;
+  const limit = options.limit ? toInteger(options.limit) : 500;
   let types;
 
   if (!options.run) {
