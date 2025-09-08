@@ -20,10 +20,16 @@ const expensesQuery = gql`
         legacyId
         type
         items {
+          id
           url
+          file {
+            name
+          }
         }
         attachedFiles {
+          id
           url
+          name
         }
       }
     }
@@ -100,20 +106,22 @@ async function main(argv = process.argv) {
       fs.mkdirSync(expenseDir, { recursive: true });
     }
 
+    const attachedFiles = expense.attachedFiles || [];
     // Attached files
-    for (const file of expense.attachedFiles) {
+    for (const file of attachedFiles) {
       console.log(`Exporting file ${file.url}`);
       if (options.run) {
-        const filename = `attached-file-${path.basename(decodeURIComponent(file.url))}`;
-        await downloadFile(file.url, path.join(expenseDir, filename));
+        const filename = file.name || `attached-file-${path.basename(decodeURIComponent(file.url))}`;
+        await downloadFile(file.url, path.join(expenseDir, filename), headers);
       }
     }
+    const items = expense.items?.filter((item) => item.url) || [];
     // Items
-    for (const item of expense.items.filter((item) => item.url)) {
+    for (const item of items) {
       console.log(`Exporting item ${item.url}`);
       if (options.run) {
-        const filename = `item-${path.basename(decodeURIComponent(item.url))}`;
-        await downloadFile(item.url, path.join(expenseDir, filename));
+        const filename = item.file?.name || `item-${path.basename(decodeURIComponent(item.url))}`;
+        await downloadFile(item.url, path.join(expenseDir, filename), headers);
       }
     }
 
