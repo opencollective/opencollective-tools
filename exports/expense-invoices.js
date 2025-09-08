@@ -6,6 +6,7 @@ const { Readable } = require('stream');
 
 const { request, gql } = require('graphql-request');
 const path = require('path');
+const { toInteger } = require('lodash');
 
 const endpoint = process.env.PERSONAL_TOKEN
   ? `${process.env.API_URL}/graphql?personalToken=${process.env.PERSONAL_TOKEN}`
@@ -63,12 +64,13 @@ const getPDFServiceHeaders = () => {
 };
 
 const downloadFile = async (url, filename, headers = {}) => {
-  const response = await fetch(url, { headers });
+  const response = await fetch(url, { headers, credentials: 'include' });
   if (response.ok && response.body) {
     const writer = fs.createWriteStream(filename);
     Readable.fromWeb(response.body).pipe(writer);
   } else {
-    throw new Error('Failed to download file:', url);
+    console.log(response);
+    throw new Error(`Failed to download file: ${response.status} ${await response.text()} ${url}`);
   }
 };
 
@@ -96,6 +98,8 @@ async function main(argv = process.argv) {
     fs.mkdirSync(exportDir, { recursive: true });
   }
 
+  const headers = getPDFServiceHeaders();
+  console.log(`Exporting ${result.expenses.nodes.length} expenses to: ${exportDir}`);
   for (const expense of result.expenses.nodes) {
     console.log(`Exporting expense ${expense.legacyId}`);
     const expenseDir = path.join(exportDir, `Expense-${expense.legacyId}`);
