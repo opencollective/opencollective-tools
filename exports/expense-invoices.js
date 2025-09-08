@@ -92,7 +92,11 @@ async function main(argv = process.argv) {
   for (const expense of result.expenses.nodes) {
     console.log(`Exporting expense ${expense.legacyId}`);
     const expenseDir = path.join(exportDir, `Expense-${expense.legacyId}`);
-    if (options.run && !fs.existsSync(expenseDir)) {
+    const dirExists = fs.existsSync(expenseDir);
+    if (options.run && dirExists) {
+      console.log(`Directory already exists: ${expenseDir}, skipping expense ${expense.legacyId}...`);
+      continue;
+    } else {
       fs.mkdirSync(expenseDir, { recursive: true });
     }
 
