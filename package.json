@@ -23,6 +23,7 @@
     "prettier:write": "npm run prettier -- --write"
   },
   "dependencies": {
+    "@octokit/rest": "^22.0.0",
     "@slack/bolt": "^3.12.2",
     "axios": "^0.26.1",
     "commander": "^8.3.0",
@@ -31,6 +32,7 @@
     "dotenv": "^14.3.2",
     "graphql": "^16.3.0",
     "graphql-request": "^4.0.0",
+    "inquirer": "^12.9.6",
     "lodash": "^4.17.21",
     "prompt": "^1.2.2"
   },
@@ -51,6 +53,10 @@
     "npm-run-all": "^4.1.5",
     "prettier": "^3.1.0",
     "prettier-package-json": "^2.8.0"
+  },
+  "engines": {
+    "node": ">=18",
+    "npm": ">=8"
   },
   "husky": {
     "hooks": {
