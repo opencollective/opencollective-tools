@@ -53,8 +53,13 @@ async function main(argv = process.argv) {
 
   const createdExpenses = [];
   let skippedCount = 0;
+  let processedCount = 0;
 
   for (const record of records) {
+    if (options.limit && processedCount >= options.limit) {
+      console.log(`\nReached limit of ${options.limit} expenses, stopping.`);
+      break;
+    }
     const sourceUrl = record['Open Collective'];
     const destinationUrl = record['fund url'];
     const balance = record['Balance'];
@@ -94,6 +99,7 @@ async function main(argv = process.argv) {
     console.log(
       `Creating Expense: ${balance} from ${sourceSlug} to ${destinationSlug} ${!options.run ? '(dry run)' : ''}`,
     );
+    processedCount++;
 
     if (options.run) {
       try {
@@ -151,6 +157,7 @@ const getProgram = (argv) => {
   program.argument('<csvPath>', 'Path to the CSV file to parse.');
 
   addSharedOptionsToProgram(program);
+  program.option('--limit <number>', 'Limit the number of expenses to create', parseInt);
 
   program.parse(argv);
 

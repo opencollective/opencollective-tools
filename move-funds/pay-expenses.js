@@ -40,13 +40,20 @@ async function main(argv = process.argv) {
 
   let paidCount = 0;
   let failedCount = 0;
+  let processedCount = 0;
 
   for (const expense of expenses) {
+    if (options.limit && processedCount >= options.limit) {
+      console.log(`\nReached limit of ${options.limit} expenses, stopping.`);
+      break;
+    }
+
     const { sourceSlug, destinationSlug, amount, expenseId } = expense;
 
     console.log(
       `Paying Expense: ${amount} from ${sourceSlug} to ${destinationSlug} ${!options.run ? '(dry run)' : ''}`,
     );
+    processedCount++;
 
     if (options.run) {
       const variables = {
@@ -92,6 +99,7 @@ const getProgram = (argv) => {
   program.argument('<jsonPath>', 'Path to the JSON file created by create-expenses.js');
 
   addSharedOptionsToProgram(program);
+  program.option('--limit <number>', 'Limit the number of expenses to pay', parseInt);
 
   program.parse(argv);
 

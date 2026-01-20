@@ -18,6 +18,9 @@ node move-funds/create-expenses.js path/to/input.csv
 # Run for real (will prompt for 2FA)
 node move-funds/create-expenses.js path/to/input.csv --run
 
+# Limit to first 10 expenses
+node move-funds/create-expenses.js path/to/input.csv --run --limit 10
+
 # With YubiKey for 2FA
 node move-funds/create-expenses.js path/to/input.csv --run --yubikey
 ```
@@ -34,6 +37,9 @@ node move-funds/pay-expenses.js path/to/input-expenses.json
 
 # Run for real
 node move-funds/pay-expenses.js path/to/input-expenses.json --run
+
+# Limit to first 10 expenses
+node move-funds/pay-expenses.js path/to/input-expenses.json --run --limit 10
 ```
 
 ## CSV Format
