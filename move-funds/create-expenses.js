@@ -49,7 +49,7 @@ async function main(argv = process.argv) {
   }
 
   const input = fs.readFileSync(inputFilename, 'utf8');
-  const records = csvParseSync.parse(input, { columns: true });
+  const records = csvParseSync.parse(input, { columns: true, trim: true });
 
   const createdExpenses = [];
   let skippedCount = 0;
