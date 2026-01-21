@@ -51,9 +51,16 @@ async function main(argv = process.argv) {
   const input = fs.readFileSync(inputFilename, 'utf8');
   const records = csvParseSync.parse(input, { columns: true, trim: true });
 
-  const createdExpenses = [];
+  const outputFile = inputFilename.replace('.csv', '-expenses.json');
+  let createdExpenses = [];
+  if (fs.existsSync(outputFile)) {
+    createdExpenses = JSON.parse(fs.readFileSync(outputFile, 'utf8'));
+    console.log(`Loaded ${createdExpenses.length} existing expenses from ${outputFile}`);
+  }
+
   let skippedCount = 0;
   let processedCount = 0;
+  let newCount = 0;
 
   for (const record of records) {
     if (options.limit && processedCount >= options.limit) {
@@ -89,6 +96,7 @@ async function main(argv = process.argv) {
           },
         ],
         description: `Balance transfer from ${collectiveName || sourceSlug} to ${destinationSlug}`,
+        accountingCategory: { id: '3vjrkx5l-mnv904qj-jmq8bwa7-zdygoe3d' },
         payoutMethod: {
           type: 'ACCOUNT_BALANCE',
           data: {},
@@ -130,6 +138,10 @@ async function main(argv = process.argv) {
           expenseId,
           legacyId,
         });
+        newCount++;
+
+        // Flush to file after each expense
+        fs.writeFileSync(outputFile, JSON.stringify(createdExpenses, null, 2));
       } catch (e) {
         console.log(`Failed to create expense: ${e.message}`);
         continue;
@@ -138,13 +150,10 @@ async function main(argv = process.argv) {
   }
 
   console.log(`\nSummary:`);
-  console.log(`- Created and approved: ${createdExpenses.length}`);
+  console.log(`- Created and approved: ${newCount}`);
   console.log(`- Skipped: ${skippedCount}`);
-
-  if (options.run && createdExpenses.length > 0) {
-    const outputFile = inputFilename.replace('.csv', '-expenses.json');
-    fs.writeFileSync(outputFile, JSON.stringify(createdExpenses, null, 2));
-    console.log(`\nExpense IDs saved to: ${outputFile}`);
+  if (newCount > 0) {
+    console.log(`- Total in ${outputFile}: ${createdExpenses.length}`);
     console.log(`Run pay-expenses.js with this file to pay the expenses.`);
   }
 }
