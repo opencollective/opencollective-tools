@@ -23,41 +23,41 @@
     "prettier:write": "npm run prettier -- --write"
   },
   "dependencies": {
-    "@octokit/rest": "^22.0.0",
+    "@octokit/rest": "^22.0.1",
     "@slack/bolt": "^3.12.2",
     "axios": "^0.26.1",
     "commander": "^8.3.0",
     "csv-parse": "^5.0.4",
-    "debug": "^4.3.3",
+    "debug": "^4.4.3",
     "dotenv": "^14.3.2",
-    "graphql": "^16.3.0",
+    "graphql": "^16.12.0",
     "graphql-request": "^4.0.0",
     "inquirer": "^12.9.6",
     "lodash": "^4.17.21",
     "p-ratelimit": "^1.0.1",
-    "prompt": "^1.2.2"
+    "prompt": "^1.3.0"
   },
   "devDependencies": {
-    "@babel/core": "^7.23.5",
-    "@babel/eslint-parser": "^7.23.3",
+    "@babel/core": "^7.28.6",
+    "@babel/eslint-parser": "^7.28.6",
     "depcheck": "^1.4.7",
     "eslint": "^8.55.0",
     "eslint-config-opencollective": "^3.0.3",
     "eslint-plugin-babel": "^5.3.1",
-    "eslint-plugin-import": "^2.29.0",
+    "eslint-plugin-import": "^2.32.0",
     "eslint-plugin-node": "^11.1.0",
-    "eslint-plugin-react": "^7.33.2",
+    "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-simple-import-sort": "^10.0.0",
     "husky": "^4.3.5",
     "lint-staged": "^10.5.4",
     "mocha": "^10.2.0",
     "npm-run-all": "^4.1.5",
-    "prettier": "^3.1.0",
+    "prettier": "^3.8.0",
     "prettier-package-json": "^2.8.0"
   },
   "engines": {
-    "node": ">=18",
-    "npm": ">=8"
+    "node": ">=24",
+    "npm": ">=11"
   },
   "husky": {
     "hooks": {
