@@ -3,8 +3,11 @@
 import fs from 'fs';
 
 import { program } from 'commander';
+import dotenv from 'dotenv';
 import { parse } from 'csv-parse/sync'; // eslint-disable-line n/no-unpublished-import
 import fetch from 'node-fetch';
+
+dotenv.config();
 
 const VALID_TYPES = new Set(['TICKET', 'SERVICE', 'PRODUCT', 'MEMBERSHIP']);
 const DEFAULT_ENDPOINT = 'https://api.opencollective.com/graphql/v2';
@@ -15,7 +18,6 @@ const LOOKUP_QUERY = `
       id
       name
       type
-      collective { slug }
     }
   }
 `;
@@ -31,18 +33,41 @@ const EDIT_MUTATION = `
   }
 `;
 
-const gql = async (endpoint: string, token: string, query: string, variables: object) => {
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Personal-Token': token,
-    },
-    body: JSON.stringify({ query, variables }),
-  });
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+const gql = async (endpoint: string, token: string, query: string, variables: object, retries = 3): Promise<any> => {
+  let res: Awaited<ReturnType<typeof fetch>>;
+  try {
+    res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Personal-Token': token,
+      },
+      body: JSON.stringify({ query, variables }),
+    });
+  } catch (e) {
+    if (retries <= 0) throw e;
+    const wait = 5000;
+    console.log(`Network error (${e.message}). Retrying in ${wait / 1000}s...`);
+    await sleep(wait);
+    return gql(endpoint, token, query, variables, retries - 1);
+  }
+  if (res.status === 429) {
+    if (retries <= 0) {
+      throw new Error('Rate limited (HTTP 429) with no retries remaining');
+    }
+    const retryAfter = parseInt(res.headers.get('retry-after') ?? '60', 10);
+    console.log(`Rate limited. Waiting ${retryAfter}s before retrying...`);
+    await sleep(retryAfter * 1000);
+    return gql(endpoint, token, query, variables, retries - 1);
+  }
   const json = (await res.json()) as { data?: any; errors?: any[] };
   if (json.errors?.length) {
-    throw new Error(JSON.stringify(json.errors));
+    throw new Error(JSON.stringify(json.errors, null, 2));
+  }
+  if (!json.data) {
+    throw new Error(`Unexpected response (HTTP ${res.status}): ${JSON.stringify(json, null, 2)}`);
   }
   return json.data;
 };
@@ -51,11 +76,13 @@ const main = async () => {
   program
     .argument('<csvPath>', 'Path to CSV file with tierId and type columns')
     .option('--endpoint <url>', 'GraphQL endpoint', DEFAULT_ENDPOINT)
-    .option('--run', 'Actually perform the updates (default is dry-run)', false);
+    .option('--run', 'Actually perform the updates (default is dry-run)', false)
+    .option('--delay <ms>', 'Delay in milliseconds between API calls', '700');
   program.parse(process.argv);
 
   const [csvPath] = program.args;
-  const { endpoint, run: doRun } = program.opts();
+  const { endpoint, run: doRun, delay: delayMs } = program.opts();
+  const delay = parseInt(delayMs, 10);
 
   const token = process.env.PERSONAL_TOKEN;
   if (!token) {
@@ -83,18 +110,40 @@ const main = async () => {
     publicId: string;
     currentType: string;
     newType: string;
-    collective: string;
     name: string;
   }[] = [];
+  const notFound: { tierId: string; type: string }[] = [];
   for (const row of rows) {
     const legacyId = parseInt(row.tierId, 10);
-    const data = await gql(endpoint, token, LOOKUP_QUERY, { legacyId });
-    if (!data.tier) {
-      throw new Error(`Tier ${legacyId} not found`);
+    let data: any;
+    try {
+      data = await gql(endpoint, token, LOOKUP_QUERY, { legacyId });
+    } catch (e) {
+      let isNotFound = false;
+      try {
+        const errors = JSON.parse(e.message);
+        isNotFound = Array.isArray(errors) && errors.some(err => err.extensions?.code === 'NotFound');
+      } catch {
+        // not a GraphQL error array
+      }
+      if (isNotFound) {
+        console.log(`  #${legacyId}: not found, skipping`);
+        notFound.push(row);
+        await sleep(delay);
+        continue;
+      }
+      throw e;
     }
-    const { id: publicId, name, type: currentType, collective } = data.tier;
-    plan.push({ legacyId, publicId, currentType, newType: row.type, name, collective: collective.slug });
-    console.log(`  #${legacyId} "${name}" (${collective.slug}): ${currentType} -> ${row.type}`);
+    if (!data.tier) {
+      console.log(`  #${legacyId}: not found, skipping`);
+      notFound.push(row);
+      await sleep(delay);
+      continue;
+    }
+    const { id: publicId, name, type: currentType } = data.tier;
+    plan.push({ legacyId, publicId, currentType, newType: row.type, name });
+    console.log(`  #${legacyId} "${name}": ${currentType} -> ${row.type}`);
+    await sleep(delay);
   }
 
   if (!doRun) {
@@ -108,15 +157,23 @@ const main = async () => {
   for (const item of plan) {
     try {
       await gql(endpoint, token, EDIT_MUTATION, { id: item.publicId, type: item.newType });
-      console.log(`[ok] Tier #${item.legacyId} "${item.name}": ${item.currentType} -> ${item.newType}`);
+      console.log(`[ok]   Tier #${item.legacyId} "${item.name}": ${item.currentType} -> ${item.newType}`);
       success++;
     } catch (e) {
       console.error(`[fail] Tier #${item.legacyId} "${item.name}": ${e.message}`);
       failed++;
     }
+    await sleep(delay);
   }
 
   console.log(`\nDone: ${success} updated, ${failed} failed.`);
+
+  if (notFound.length > 0) {
+    const notFoundPath = csvPath.replace(/\.csv$/i, '') + '-not-found.csv';
+    const csvContent = ['tierId,type', ...notFound.map(r => `${r.tierId},${r.type}`)].join('\n') + '\n';
+    fs.writeFileSync(notFoundPath, csvContent, 'utf8');
+    console.log(`\n${notFound.length} tier(s) not found. Written to: ${notFoundPath}`);
+  }
 };
 
 main()
