@@ -18,7 +18,8 @@
     "lint": "eslint \"*.js\"",
     "lint:fix": "npm run lint -- --fix",
     "lint:quiet": "npm run lint -- --quiet",
-    "prettier": "prettier \"*.@(js|json|md)\"",
+    "prettier": "prettier \"*.@(js|json|md)\" \"github-sponsors/csv-import-mapping.json\"",
+    "validate:csv-import-mapping": "node github-sponsors/validate-csv-import-mapping.js",
     "prettier:check": "npm run prettier -- --check",
     "prettier:write": "npm run prettier -- --write"
   },
