@@ -5,11 +5,20 @@ Classifies open source collective donation tiers as commercial (yes/no),
 and subcategorizes commercial tiers (tickets, sponsorships, hosting,
 consulting, pre-releases, product, discounts, prioritisation).
 
+Installation:
+    assuming mac os and brew are installed
+    brew install python virtualenv
+    python3 -m venv .venv
+    source .venv/bin/activate
+    python3 -m pip install anthropic pandas
+    export ANTHROPIC_API_KEY=<your key here>
+
 Usage:
     python classify_tiers.py --input your_file.csv --output classified.csv
 
 Requires:
     pip install anthropic pandas
+
 """
 
 import argparse
