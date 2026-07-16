@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
 Tier Description Classifier
-Classifies open source collective donation tiers as commercial (yes/no).
+Classifies open source collective donation tiers as commercial (yes/no),
+and subcategorizes commercial tiers (tickets, sponsorships, hosting,
+consulting, pre-releases, product, discounts, prioritisation).
 
 Usage:
     python classify_tiers.py --input your_file.csv --output classified.csv
@@ -20,19 +22,17 @@ import anthropic
 
 SYSTEM = """You classify donation tier descriptions for open source projects.
 
-For each description, answer YES or NO.
+For each description, answer YES or NO. If YES, also assign exactly one subcategory.
 
-YES — the tier offers a concrete commercial product, service, or benefit with real-world value. Examples:
-- Structured personal support: office hours, scheduled video/phone calls, 1:1 catchups with maintainers, guaranteed email/issue responses within a stated timeframe
-- Direct influence on development: an offer to implement a specifc feature or fix a specific issue or bug UNLESS the tier is dedicated to that specific feature, issue, or bug
-- Direct advertising: clickable banner ads on a website, in-game, or in an app (not just a static logo in a README or docs)
-- Hosted or managed services: fully managed instances, VPS setup, long-term managed hosting
-- Access to paid or premium app features
-- Event tickets or event registration
-- Consulting: monthly consulting sessions, commissioned or custom development work
-- Commercial software keys: game keys, software licences
-- Guaranteed/committed response: explicit promise to answer emails, issues, or bug reports within a stated time window
-- Project acquisition opportunities
+YES — the tier offers a concrete commercial product, service, or benefit with real-world value. Examples, grouped by subcategory:
+- consulting: office hours, scheduled video/phone calls, 1:1 catchups with maintainers, monthly consulting sessions, commissioned or custom development work, training sessions
+- prioritisation: guaranteed/committed response — an explicit promise to answer emails, issues, or bug reports within a stated time window; an offer to implement a specific feature or fix a specific issue or bug UNLESS the tier is dedicated to that specific feature, issue, or bug; project acquisition opportunities
+- sponsorships: direct advertising — clickable banner ads on a website, in-game, or in an app (not just a static logo in a README or docs)
+- hosting: hosted or managed services — fully managed instances, VPS setup, long-term managed hosting
+- product: access to paid or premium app features; commercial software keys such as game keys or software licences
+- tickets: event tickets or event registration
+- discounts: discount codes or reduced pricing on a paid product, service, ticket, or subscription
+- pre-releases: exclusive pre-release or early access that is itself part of a paid commercial offering (generic beta/early access on its own is NO — see below)
 
 NO — the tier offers only recognition, low-value perks, or intangible acknowledgements. Examples:
 - Name, logo, or avatar in README, docs, website, about screen, backers list, or changelog
@@ -50,8 +50,13 @@ NO — the tier offers only recognition, low-value perks, or intangible acknowle
 - Community event funding acknowledgements
 - Sponsor-only GitHub discussions or forum access
 
-Respond ONLY with a JSON array. Each element: {"index": <original_index>, "commercial": "yes"/"no", "note": "<brief reason max 10 words, or empty>"}
+Respond ONLY with a JSON array. Each element: {"index": <original_index>, "commercial": "yes"/"no", "subcategory": "<one of: tickets, sponsorships, hosting, consulting, pre-releases, product, discounts, prioritisation — or empty string if commercial is no>", "note": "<brief reason max 10 words, or empty>"}
 No markdown, no explanation outside the JSON."""
+
+ALLOWED_SUBCATEGORIES = {
+    "tickets", "sponsorships", "hosting", "consulting",
+    "pre-releases", "product", "discounts", "prioritisation",
+}
 
 
 def sanitize(text: str, max_len: int = 280) -> str:
@@ -170,8 +175,12 @@ def main():
                 try:
                     classified_batch = classify_batch(client, batch)
                     for item in classified_batch:
+                        subcategory = item.get("subcategory", "") if item["commercial"] == "yes" else ""
+                        if item["commercial"] == "yes" and subcategory not in ALLOWED_SUBCATEGORIES:
+                            print(f"  Warning: row {item['index']} has unrecognized subcategory {subcategory!r}")
                         results[str(item["index"])] = {
                             "commercial": item["commercial"],
+                            "subcategory": subcategory,
                             "note": item.get("note", "")
                         }
                         if item["commercial"] == "yes":
@@ -200,21 +209,27 @@ def main():
     # Build output dataframe
     print("\nBuilding output CSV...")
     df["commercial_product_service"] = ""
+    df["commercial_subcategory"] = ""
     df["notes"] = ""
 
     for idx_str, result in results.items():
         idx = int(idx_str)
         df.at[idx, "commercial_product_service"] = result.get("commercial", "")
+        df.at[idx, "commercial_subcategory"] = result.get("subcategory", "")
         df.at[idx, "notes"] = result.get("note", "")
 
     df.to_csv(args.output, index=False)
-    
+
     total_yes = sum(1 for v in results.values() if v.get("commercial") == "yes")
     total_no = sum(1 for v in results.values() if v.get("commercial") == "no")
     print(f"\nDone! Output written to {args.output}")
     print(f"  YES (commercial): {total_yes}")
     print(f"  NO:               {total_no}")
     print(f"  Blank (no desc):  {len(df) - len(results)}")
+    print("  Subcategory breakdown (YES only):")
+    for subcat in sorted(ALLOWED_SUBCATEGORIES):
+        count = sum(1 for v in results.values() if v.get("subcategory") == subcat)
+        print(f"    {subcat}: {count}")
 
 
 if __name__ == "__main__":
