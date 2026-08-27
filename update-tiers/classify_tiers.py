@@ -1,13 +1,24 @@
 #!/usr/bin/env python3
 """
 Tier Description Classifier
-Classifies open source collective donation tiers as commercial (yes/no).
+Classifies open source collective donation tiers as commercial (yes/no),
+and subcategorizes commercial tiers (tickets, sponsorships, hosting,
+consulting, pre-releases, product, discounts, prioritisation).
+
+Installation:
+    assuming mac os and brew are installed
+    brew install python virtualenv
+    python3 -m venv .venv
+    source .venv/bin/activate
+    python3 -m pip install anthropic pandas
+    export ANTHROPIC_API_KEY=<your key here>
 
 Usage:
     python classify_tiers.py --input your_file.csv --output classified.csv
 
 Requires:
     pip install anthropic pandas
+
 """
 
 import argparse
@@ -20,19 +31,17 @@ import anthropic
 
 SYSTEM = """You classify donation tier descriptions for open source projects.
 
-For each description, answer YES or NO.
+For each description, answer YES or NO. If YES, also assign exactly one subcategory.
 
-YES — the tier offers a concrete commercial product, service, or benefit with real-world value. Examples:
-- Structured personal support: office hours, scheduled video/phone calls, 1:1 catchups with maintainers, guaranteed email/issue responses within a stated timeframe
-- Direct influence on development: an offer to implement a specifc feature or fix a specific issue or bug UNLESS the tier is dedicated to that specific feature, issue, or bug
-- Direct advertising: clickable banner ads on a website, in-game, or in an app (not just a static logo in a README or docs)
-- Hosted or managed services: fully managed instances, VPS setup, long-term managed hosting
-- Access to paid or premium app features
-- Event tickets or event registration
-- Consulting: monthly consulting sessions, commissioned or custom development work
-- Commercial software keys: game keys, software licences
-- Guaranteed/committed response: explicit promise to answer emails, issues, or bug reports within a stated time window
-- Project acquisition opportunities
+YES — the tier offers a concrete commercial product, service, or benefit with real-world value. Examples, grouped by subcategory:
+- consulting: office hours, scheduled video/phone calls, 1:1 catchups with maintainers, monthly consulting sessions, commissioned or custom development work, training sessions
+- prioritisation: guaranteed/committed response — an explicit promise to answer emails, issues, or bug reports within a stated time window; an offer to implement a specific feature or fix a specific issue or bug UNLESS the tier is dedicated to that specific feature, issue, or bug; project acquisition opportunities
+- sponsorships: direct advertising — clickable banner ads on a website, in-game, or in an app (not just a static logo in a README or docs)
+- hosting: hosted or managed services — fully managed instances, VPS setup, long-term managed hosting
+- product: access to paid or premium app features; commercial software keys such as game keys or software licences
+- tickets: event tickets or event registration
+- discounts: discount codes or reduced pricing on a paid product, service, ticket, or subscription
+- pre-releases: exclusive pre-release or early access that is itself part of a paid commercial offering (generic beta/early access on its own is NO — see below)
 
 NO — the tier offers only recognition, low-value perks, or intangible acknowledgements. Examples:
 - Name, logo, or avatar in README, docs, website, about screen, backers list, or changelog
@@ -50,8 +59,34 @@ NO — the tier offers only recognition, low-value perks, or intangible acknowle
 - Community event funding acknowledgements
 - Sponsor-only GitHub discussions or forum access
 
-Respond ONLY with a JSON array. Each element: {"index": <original_index>, "commercial": "yes"/"no", "note": "<brief reason max 10 words, or empty>"}
+Respond ONLY with a JSON array. Each element: {"index": <original_index>, "commercial": "yes"/"no", "subcategory": "<one of: tickets, sponsorships, hosting, consulting, pre-releases, product, discounts, prioritisation — or empty string if commercial is no>", "note": "<brief reason max 10 words, or empty>"}
 No markdown, no explanation outside the JSON."""
+
+ALLOWED_SUBCATEGORIES = {
+    "tickets", "sponsorships", "hosting", "consulting",
+    "pre-releases", "product", "discounts", "prioritisation",
+}
+
+SYSTEM_SUBCATEGORIZE = """You have already confirmed that each of the following texts describes a
+donation tier that offers a concrete commercial product, service, or benefit. Your only job is to
+assign exactly one subcategory to each, based on these definitions:
+
+- consulting: office hours, scheduled video/phone calls, 1:1 catchups with maintainers, monthly consulting sessions, commissioned or custom development work, training sessions
+- prioritisation: guaranteed/committed response — an explicit promise to answer emails, issues, or bug reports within a stated time window; an offer to implement a specific feature or fix a specific issue or bug UNLESS the tier is dedicated to that specific feature, issue, or bug; project acquisition opportunities
+- sponsorships: direct advertising — clickable banner ads on a website, in-game, or in an app (not just a static logo in a README or docs)
+- hosting: hosted or managed services — fully managed instances, VPS setup, long-term managed hosting
+- product: access to paid or premium app features; commercial software keys such as game keys or software licences
+- tickets: event tickets or event registration
+- discounts: discount codes or reduced pricing on a paid product, service, ticket, or subscription
+- pre-releases: exclusive pre-release or early access that is itself part of a paid commercial offering
+
+Respond ONLY with a JSON array. Each element: {"index": <original_index>, "subcategory": "<one of: tickets, sponsorships, hosting, consulting, pre-releases, product, discounts, prioritisation>"}
+No markdown, no explanation outside the JSON."""
+
+
+def _clean(value) -> str:
+    """Normalize a possibly-missing/NaN CSV cell to a stripped string, or empty string."""
+    return str(value).strip() if pd.notna(value) else ""
 
 
 def sanitize(text: str, max_len: int = 280) -> str:
@@ -117,6 +152,21 @@ def classify_batch(client, batch: list[dict]) -> list[dict]:
     return parse_response(message.content[0].text)
 
 
+def subcategorize_batch(client, batch: list[dict]) -> list[dict]:
+    """Send a batch of already-commercial rows to the API and return subcategory assignments."""
+    items = [{"index": r["index"], "description": sanitize(r["text"])} for r in batch]
+    payload = json.dumps(items, ensure_ascii=True)
+
+    message = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=2000,
+        system=SYSTEM_SUBCATEGORIZE,
+        messages=[{"role": "user", "content": payload}]
+    )
+
+    return parse_response(message.content[0].text)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Classify tier descriptions as commercial or not")
     parser.add_argument("--input", required=True, help="Path to input CSV file")
@@ -140,38 +190,67 @@ def main():
     print(f"Loaded {len(df)} rows")
 
     # Load resume state if provided
-    results = {}
+    classify_results = {}
+    subcat_results = {}
     if args.resume and os.path.exists(args.resume):
         with open(args.resume) as f:
-            results = json.load(f)
-        print(f"Resuming from {len(results)} already-classified rows")
+            checkpoint_data = json.load(f)
+        classify_results = checkpoint_data.get("classify", {})
+        subcat_results = checkpoint_data.get("subcategorize", {})
+        print(f"Resuming: {len(classify_results)} classified, {len(subcat_results)} subcategorized")
 
-    # Prepare rows to classify (skip already done, skip empty descriptions)
+    def save_checkpoint():
+        checkpoint = args.output.replace(".csv", "_checkpoint.json")
+        with open(checkpoint, "w") as f:
+            json.dump({"classify": classify_results, "subcategorize": subcat_results}, f)
+        print(f"  Checkpoint saved to {checkpoint}")
+
+    # Triage rows: fresh classification, subcategory backfill, or already done
     to_classify = []
+    to_subcategorize = []
     for i, row in df.iterrows():
-        desc = str(row.get("Description", "")) if pd.notna(row.get("Description")) else ""
-        if desc.strip() and str(i) not in results:
-            to_classify.append({"index": i, "description": desc})
+        desc = _clean(row.get("Description"))
+        existing_commercial = _clean(row.get("commercial_product_service"))
+        existing_subcategory = _clean(row.get("commercial_subcategory"))
+        existing_notes = _clean(row.get("notes"))
+
+        if existing_commercial == "":
+            if desc and str(i) not in classify_results:
+                to_classify.append({"index": i, "description": desc})
+        elif existing_commercial == "yes":
+            if existing_subcategory == "" and str(i) not in subcat_results:
+                text = existing_notes or desc
+                if text:
+                    to_subcategorize.append({"index": i, "text": text})
+                else:
+                    print(f"  Warning: row {i} is YES but has no notes or Description to subcategorize, skipping")
+        elif existing_commercial != "no":
+            print(f"  Warning: row {i} has unrecognized commercial_product_service value {existing_commercial!r}, skipping")
 
     print(f"Rows to classify: {len(to_classify)}")
-    
+    print(f"Rows to subcategorize: {len(to_subcategorize)}")
+
+    # Pass A: fresh commercial + subcategory classification
     if not to_classify:
         print("Nothing to classify - all rows already done.")
     else:
-        # Process in batches
         total_batches = (len(to_classify) + args.batch_size - 1) // args.batch_size
         classified = 0
-        yes_count = sum(1 for v in results.values() if v.get("commercial") == "yes")
+        yes_count = sum(1 for v in classify_results.values() if v.get("commercial") == "yes")
 
         for b in range(total_batches):
             batch = to_classify[b * args.batch_size:(b + 1) * args.batch_size]
-            
+
             for attempt in range(3):
                 try:
                     classified_batch = classify_batch(client, batch)
                     for item in classified_batch:
-                        results[str(item["index"])] = {
+                        subcategory = item.get("subcategory", "") if item["commercial"] == "yes" else ""
+                        if item["commercial"] == "yes" and subcategory not in ALLOWED_SUBCATEGORIES:
+                            print(f"  Warning: row {item['index']} has unrecognized subcategory {subcategory!r}")
+                        classify_results[str(item["index"])] = {
                             "commercial": item["commercial"],
+                            "subcategory": subcategory,
                             "note": item.get("note", "")
                         }
                         if item["commercial"] == "yes":
@@ -186,35 +265,83 @@ def main():
                         print(f"  Batch {b+1} skipped after 3 failures")
 
             pct = round(classified / len(to_classify) * 100)
-            print(f"Batch {b+1}/{total_batches} done | {classified}/{len(to_classify)} ({pct}%) | YES so far: {yes_count}")
+            print(f"Classify batch {b+1}/{total_batches} done | {classified}/{len(to_classify)} ({pct}%) | YES so far: {yes_count}")
 
-            # Save progress checkpoint every 10 batches
             if (b + 1) % 10 == 0:
-                checkpoint = args.output.replace(".csv", "_checkpoint.json")
-                with open(checkpoint, "w") as f:
-                    json.dump(results, f)
-                print(f"  Checkpoint saved to {checkpoint}")
+                save_checkpoint()
 
             time.sleep(0.3)  # slight delay to avoid rate limits
 
-    # Build output dataframe
-    print("\nBuilding output CSV...")
-    df["commercial_product_service"] = ""
-    df["notes"] = ""
+    # Pass B: subcategory backfill for rows already known to be commercial
+    if not to_subcategorize:
+        print("Nothing to subcategorize - all commercial rows already have one.")
+    else:
+        total_batches = (len(to_subcategorize) + args.batch_size - 1) // args.batch_size
+        subcategorized = 0
 
-    for idx_str, result in results.items():
+        for b in range(total_batches):
+            batch = to_subcategorize[b * args.batch_size:(b + 1) * args.batch_size]
+
+            for attempt in range(3):
+                try:
+                    subcat_batch = subcategorize_batch(client, batch)
+                    for item in subcat_batch:
+                        subcategory = item.get("subcategory", "")
+                        if subcategory not in ALLOWED_SUBCATEGORIES:
+                            print(f"  Warning: row {item['index']} has unrecognized subcategory {subcategory!r}")
+                        subcat_results[str(item["index"])] = {"subcategory": subcategory}
+                    subcategorized += len(subcat_batch)
+                    break
+                except Exception as e:
+                    print(f"  Batch {b+1} attempt {attempt+1} failed: {e}")
+                    if attempt < 2:
+                        time.sleep(2)
+                    else:
+                        print(f"  Batch {b+1} skipped after 3 failures")
+
+            pct = round(subcategorized / len(to_subcategorize) * 100)
+            print(f"Subcategorize batch {b+1}/{total_batches} done | {subcategorized}/{len(to_subcategorize)} ({pct}%)")
+
+            if (b + 1) % 10 == 0:
+                save_checkpoint()
+
+            time.sleep(0.3)  # slight delay to avoid rate limits
+
+    # Build output dataframe - only touch cells actually processed, preserve everything else
+    print("\nBuilding output CSV...")
+    for col in ("commercial_product_service", "commercial_subcategory", "notes"):
+        if col not in df.columns:
+            df[col] = ""
+        else:
+            df[col] = df[col].fillna("")
+
+    for idx_str, result in classify_results.items():
         idx = int(idx_str)
         df.at[idx, "commercial_product_service"] = result.get("commercial", "")
+        df.at[idx, "commercial_subcategory"] = result.get("subcategory", "")
         df.at[idx, "notes"] = result.get("note", "")
 
+    for idx_str, result in subcat_results.items():
+        idx = int(idx_str)
+        df.at[idx, "commercial_subcategory"] = result.get("subcategory", "")
+
     df.to_csv(args.output, index=False)
-    
-    total_yes = sum(1 for v in results.values() if v.get("commercial") == "yes")
-    total_no = sum(1 for v in results.values() if v.get("commercial") == "no")
+
+    total_yes = (df["commercial_product_service"] == "yes").sum()
+    total_no = (df["commercial_product_service"] == "no").sum()
+    total_blank = (df["commercial_product_service"] == "").sum()
+    missing_subcategory = ((df["commercial_product_service"] == "yes") & (df["commercial_subcategory"] == "")).sum()
+
     print(f"\nDone! Output written to {args.output}")
-    print(f"  YES (commercial): {total_yes}")
-    print(f"  NO:               {total_no}")
-    print(f"  Blank (no desc):  {len(df) - len(results)}")
+    print(f"  This run: {len(classify_results)} classified, {len(subcat_results)} subcategorized")
+    print(f"  YES (commercial):             {total_yes}")
+    print(f"  NO:                           {total_no}")
+    print(f"  Blank (no desc/unclassified): {total_blank}")
+    print(f"  YES missing subcategory:      {missing_subcategory}")
+    print("  Subcategory breakdown (YES only, full file):")
+    for subcat in sorted(ALLOWED_SUBCATEGORIES):
+        count = (df["commercial_subcategory"] == subcat).sum()
+        print(f"    {subcat}: {count}")
 
 
 if __name__ == "__main__":
