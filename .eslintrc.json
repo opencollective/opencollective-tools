@@ -3,6 +3,7 @@
   "parser": "@babel/eslint-parser",
   "plugins": ["simple-import-sort"],
   "rules": {
+    "node/shebang": "off",
     "no-process-exit": "off",
     "simple-import-sort/imports": [
       "error",
