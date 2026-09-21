@@ -32,6 +32,15 @@ const getEndpoint = () => {
     : `${process.env.API_URL}/graphql/${process.env.API_KEY}`;
 };
 
+// Production detection based on the API hostname (not a substring match)
+const isProductionApi = () => {
+  try {
+    return new URL(process.env.API_URL).hostname === 'api.opencollective.com';
+  } catch {
+    return false;
+  }
+};
+
 // ============================================================================
 // GraphQL Queries
 // ============================================================================
@@ -490,7 +499,7 @@ async function processExpenses(options) {
   const { slug, run: isRun, limit: maxToProcess, minScore, status, autoApprove, showSimilar, after, before } = options;
 
   // Production safety check
-  const isProduction = process.env.API_URL && process.env.API_URL.includes('api.opencollective.com');
+  const isProduction = isProductionApi();
   if (isRun && isProduction) {
     console.log('\n⚠️  WARNING: You are about to modify expenses in PRODUCTION! ⚠️');
     console.log(`   API: ${process.env.API_URL}\n`);
@@ -772,7 +781,7 @@ program
   .option('--before <date>', 'Only process expenses before this date (YYYY-MM-DD)')
   .option('--show-similar', 'Show similar expenses used for tag suggestion')
   .action(async (slug, options) => {
-    const isProduction = process.env.API_URL && process.env.API_URL.includes('api.opencollective.com');
+    const isProduction = isProductionApi();
 
     console.log(`\nExpense Tagging Tool`);
     console.log(`${'='.repeat(60)}`);
