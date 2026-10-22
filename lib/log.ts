@@ -14,9 +14,12 @@ function print(
 ): void {
   const options = { stream };
   if (typeof message === 'string') {
-    console[method](styleText(style, `${emoji} ${message}`, options), ...args);
-  } else {
+    const prefix = emoji ? `${emoji} ` : '';
+    console[method](styleText(style, `${prefix}${message}`, options), ...args);
+  } else if (emoji) {
     console[method](styleText(style, emoji, options), message, ...args);
+  } else {
+    console[method](message, ...args);
   }
 }
 
@@ -33,5 +36,5 @@ export function error(message: unknown, ...args: unknown[]): void {
 }
 
 export function debug(message: unknown, ...args: unknown[]): void {
-  print('debug', process.stdout, 'dim', '🐛', message, args);
+  print('debug', process.stdout, 'dim', '', message, args);
 }
