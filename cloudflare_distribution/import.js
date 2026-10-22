@@ -253,7 +253,9 @@ async function fetchExistingActivity(fundSlug) {
   const expenses = await fetchAll(fundExpensesQuery, { slug: fundSlug }, (data) => data.expenses);
   const expensesByKey = new Map();
   const expensesBySlug = new Map();
+  const expenseCreatedAt = new Map();
   for (const expense of expenses) {
+    expenseCreatedAt.set(expense.legacyId, expense.createdAt);
     // Paid expenses only count if they were created this month, anything still open always counts
     if (expense.status === 'PAID' && expense.createdAt < dateFrom) {
       continue;
@@ -267,7 +269,7 @@ async function fetchExistingActivity(fundSlug) {
     }
   }
 
-  return { paidThisMonth, recurring, expensesByKey, expensesBySlug };
+  return { paidThisMonth, recurring, expensesByKey, expensesBySlug, expenseCreatedAt };
 }
 
 const refFromLedger = (text) => {
@@ -313,6 +315,22 @@ function writeCsvWithLinks(inputFilename, records, rows, ledger, fund) {
   console.log(`Wrote ${updated} links to ${outputFilename}`);
 }
 
+const canReceiveFromFund = (account, fundHostId) =>
+  Boolean(account && account.isActive && !account.isArchived && !account.isFrozen && account.host?.id === fundHostId);
+
+// The invite expense previously created for a row, found through the ledger, the link in Status or the Fund's expenses
+function findInviteExpense(row, record, ledgerEntry, existing) {
+  const fromLedger = refFromLedger(ledgerEntry?.done);
+  const fromStatus = /\/expenses\/(\d+)\/?$/.exec(record['Status'].trim());
+  const id =
+    (fromLedger?.type === 'expense' && fromLedger.id) || fromStatus?.[1] || existing.expensesByKey.get(row.key);
+  if (!id) {
+    return null;
+  }
+  const createdAt = existing.expenseCreatedAt.get(Number(id)) || existing.expenseCreatedAt.get(id) || ledgerEntry?.at;
+  return { id, createdAt };
+}
+
 const normalizeKey = (name) =>
   String(name)
     .toLowerCase()
@@ -337,21 +355,49 @@ async function classify(record, index, { fundHostId, existing, ledger, sharedSlu
   const slug = parseSlug(record['Donation URL']) || parseSlug(record['URLs']);
   row.slug = slug;
 
-  if (ledger[key]?.done) {
-    // The account is still needed to build the contribution link for --update-csv
-    row.account = slug ? await lookupAccount(slug).catch(() => null) : null;
-    return { ...row, bucket: 'already-done', reason: `Ledger: ${ledger[key].done}` };
-  }
-
+  // The account is needed for every row: to classify it, and to build the contribution link for --update-csv
   let account = null;
+  let lookupFailed = false;
   if (slug) {
     try {
       account = await lookupAccount(slug);
     } catch (err) {
-      return { ...row, bucket: 'ambiguous', reason: `Account lookup failed for "${slug}"` };
+      lookupFailed = true;
     }
   }
   row.account = account;
+
+  // Follow-up for monthly rows that were handled with an invite expense: once the recipient has an account that can
+  // receive balance contributions (the CSV was updated with it), set up the monthly contribution. Not in the same
+  // month as the invite, which already covers that month's payment.
+  const invite = findInviteExpense(row, record, ledger[key], existing);
+  if (
+    row.frequency === 'MONTHLY' &&
+    invite &&
+    canReceiveFromFund(account, fundHostId) &&
+    !existing.recurring.has(slug)
+  ) {
+    if (!invite.createdAt || invite.createdAt >= startOfCurrentMonth()) {
+      return {
+        ...row,
+        bucket: 'already-done',
+        reason: `Invite expense #${invite.id} is from this month, monthly contribution can be set up from next month`,
+        existingRef: { type: 'expense', id: invite.id },
+      };
+    }
+    return {
+      ...row,
+      bucket: 'ready',
+      reason: `Invite expense #${invite.id} was sent earlier and the account can now receive contributions, setting up the monthly contribution`,
+    };
+  }
+
+  if (ledger[key]?.done) {
+    return { ...row, bucket: 'already-done', reason: `Ledger: ${ledger[key].done}` };
+  }
+  if (lookupFailed) {
+    return { ...row, bucket: 'ambiguous', reason: `Account lookup failed for "${slug}"` };
+  }
 
   // Duplicate checks (done for every row, including the ones marked as Sent, to verify the column).
   // Slug-based checks are not reliable when several rows target the same account, those are flagged for a manual check.
