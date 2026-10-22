@@ -23,9 +23,10 @@ export type RepoMetadata = {
   pushed_at?: string;
   created_at?: string;
   license: string | null;
+  topics?: string[] | null;
   archived?: boolean;
   fork?: boolean;
-  commit_stats?: { total_commits: number; total_committers: number };
+  commit_stats?: { total_commits: number; total_committers: number; last_synced_commit?: string | null };
 };
 
 export type EcosystemsPackage = {

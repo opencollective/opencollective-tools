@@ -8,9 +8,31 @@ const { Command } = require('commander');
 const { request, gql } = require('graphql-request');
 
 const { fetchRepoInfo, normalizeRepoKey } = require('../lib/ecosyste.ms.ts');
-const { debug, error, info } = require('../lib/log.ts');
+const { debug, error, info, warn } = require('../lib/log.ts');
+const { sleep } = require('../lib/utils.ts');
 
 import type { RepoInfo } from '../lib/ecosyste.ms.ts';
+
+import type {
+  ApplicationFacts,
+  RepositoryInfoState,
+  RepositorySnapshot,
+  RuleFlag,
+  RuleId,
+  RuleMetrics,
+  RuleSeverity,
+} from './application-rules.ts';
+
+const {
+  evaluateApplication,
+  flagsBySeverity,
+  getContributors,
+  getProjectAgeInMonths,
+  getRuleMetrics,
+  pickPrimaryError,
+  RULE_MESSAGES,
+  toRepositorySnapshot,
+} = require('./application-rules.ts');
 
 const endpoint = process.env.PERSONAL_TOKEN
   ? `${process.env.API_URL}/graphql?personalToken=${process.env.PERSONAL_TOKEN}`
@@ -18,6 +40,23 @@ const endpoint = process.env.PERSONAL_TOKEN
 
 const PAGE_SIZE = 100;
 const CACHE_DIR = path.join(__dirname, '.cache');
+// Delay between rejection mutations when running with --apply
+const APPLY_DELAY_MS = 500;
+
+const processHostApplicationMutation = gql`
+  mutation ProcessHostApplication(
+    $hostApplication: HostApplicationReferenceInput!
+    $action: ProcessHostApplicationAction!
+    $message: String
+  ) {
+    processHostApplication(hostApplication: $hostApplication, action: $action, message: $message) {
+      hostApplication {
+        id
+        status
+      }
+    }
+  }
+`;
 
 const pendingHostApplicationsQuery = gql`
   query PendingHostApplications($limit: Int!, $offset: Int!) {
@@ -25,6 +64,15 @@ const pendingHostApplicationsQuery = gql`
       id
       slug
       name
+      members(role: [ADMIN]) {
+        nodes {
+          id
+          account {
+            id
+            slug
+          }
+        }
+      }
       hostApplications(
         status: PENDING
         limit: $limit
@@ -47,9 +95,23 @@ const pendingHostApplicationsQuery = gql`
             createdAt
             description
             website
+            members(role: [ADMIN]) {
+              totalCount
+            }
+            memberInvitations(role: [ADMIN]) {
+              id
+            }
           }
-          comments {
+          comments(limit: 100) {
             totalCount
+            nodes {
+              id
+              createdAt
+              fromAccount {
+                id
+                slug
+              }
+            }
           }
         }
       }
@@ -66,6 +128,20 @@ type PendingHostApplicationAccount = {
   createdAt: string;
   description?: string;
   website?: string;
+  members?: { totalCount: number };
+  memberInvitations?: { id: string }[];
+};
+
+type HostApplicationComment = {
+  id: string;
+  createdAt?: string;
+  fromAccount?: { id: string; slug: string } | null;
+};
+
+/** A fiscal host admin, used to tell whether a comment came from the host team */
+type HostAdminMember = {
+  id: string;
+  account?: { id: string; slug: string } | null;
 };
 
 type PendingHostApplication = {
@@ -75,228 +151,39 @@ type PendingHostApplication = {
   message?: string;
   customData?: Record<string, any> | null;
   account: PendingHostApplicationAccount;
-  comments?: { totalCount: number };
+  comments?: { totalCount: number; nodes: HostApplicationComment[] };
 };
 
 type FetchResult = {
-  host: { id: string; slug: string; name: string };
+  host: { id: string; slug: string; name: string; members?: { nodes: HostAdminMember[] } };
   applications: PendingHostApplication[];
   totalCount: number;
 };
 
-type RuleOutcome = 'pass' | 'fail' | 'unverified';
-
-type Rule = {
-  name: string;
-  label: string;
-  test: (application: PendingHostApplication, repoInfo?: RepoInfo) => RuleOutcome;
+/** Triaged application: the flags the shared rules produce for it */
+type Evaluation = {
+  application: PendingHostApplication;
+  repoInfo?: RepoInfo;
+  snapshot: RepositorySnapshot | null;
+  facts: ApplicationFacts;
+  /** The properties the rules branched on, for the debug output */
+  metrics: RuleMetrics;
+  flags: RuleFlag[];
+  verdict: Verdict;
+  /** The single error we would pass down to the rejection (null when not blocked) */
+  primaryError: RuleFlag | null;
+  /** Comments left by a fiscal host admin */
+  adminCommentCount: number;
+  /** True when a fiscal host admin already commented on the application */
+  interacted: boolean;
 };
 
-type RuleResult = {
-  verdict: RuleOutcome;
-  checks: { rule: Rule; outcome: RuleOutcome }[];
-  passed: Rule[];
-  failed: Rule[];
-  unverified: Rule[];
-};
-
-const THREE_MONTHS_MS = 90 * 24 * 60 * 60 * 1000;
-
-const isBotLogin = (login?: string | null) => !!login && /\[bot\]$/i.test(login);
-
-const countHumanAuthors = (authors?: Record<string, number> | null): number | null => {
-  if (!authors || typeof authors !== 'object') {
-    return null;
-  }
-
-  return Object.keys(authors).filter((login) => !isBotLogin(login)).length;
-};
-
-const personCount = (repoInfo?: RepoInfo, countIssueAndPullRequestAuthors: boolean = false): number | null => {
-  const counts = [];
-
-  const repoCommitters = repoInfo?.repository?.commit_stats?.total_committers;
-  if (typeof repoCommitters === 'number') {
-    counts.push(repoCommitters);
-  }
-
-  for (const pkg of repoInfo?.packages || []) {
-    const pkgCommitters = pkg.repo_metadata?.commit_stats?.total_committers;
-    if (typeof pkgCommitters === 'number') {
-      counts.push(pkgCommitters);
-    }
-
-    if (Array.isArray(pkg.maintainers)) {
-      counts.push(pkg.maintainers.length);
-    }
-  }
-
-  const contributors = repoInfo?.contributors;
-  if (contributors) {
-    if (typeof contributors.total_committers === 'number') {
-      counts.push(contributors.total_committers - (contributors.total_bot_committers || 0));
-    }
-
-    if (typeof contributors.past_year_total_committers === 'number') {
-      counts.push(contributors.past_year_total_committers - (contributors.past_year_total_bot_committers || 0));
-    }
-  }
-
-  const issues = repoInfo?.issues;
-  if (countIssueAndPullRequestAuthors && issues) {
-    if (Array.isArray(issues.maintainers)) {
-      counts.push(issues.maintainers.filter((maintainer) => !isBotLogin(maintainer.login)).length);
-    }
-
-    if (Array.isArray(issues.active_maintainers)) {
-      counts.push(issues.active_maintainers.filter((maintainer) => !isBotLogin(maintainer.login)).length);
-    }
-
-    if (countIssueAndPullRequestAuthors) {
-      const humanIssueAuthors = countHumanAuthors(issues.issue_authors);
-      if (humanIssueAuthors !== null) {
-        counts.push(humanIssueAuthors);
-      }
-
-      const humanPullRequestAuthors = countHumanAuthors(issues.pull_request_authors);
-      if (humanPullRequestAuthors !== null) {
-        counts.push(humanPullRequestAuthors);
-      }
-    }
-  }
-
-  return counts.length > 0 ? Math.max(...counts) : null;
-};
-
-const oldestProjectTimestamp = (repoInfo?: RepoInfo): number | null => {
-  const timestamps = [];
-
-  if (repoInfo?.repository?.created_at) {
-    timestamps.push(new Date(repoInfo.repository.created_at).getTime());
-  }
-
-  for (const pkg of repoInfo?.packages || []) {
-    if (pkg.first_release_published_at) {
-      timestamps.push(new Date(pkg.first_release_published_at).getTime());
-    }
-  }
-
-  const valid = timestamps.filter((time) => !isNaN(time));
-  return valid.length > 0 ? Math.min(...valid) : null;
-};
-
-const usageCounts = (repoInfo?: RepoInfo): number[] => {
-  const values = [];
-
-  if (typeof repoInfo?.repository?.forks_count === 'number') {
-    values.push(repoInfo.repository.forks_count);
-  }
-
-  for (const pkg of repoInfo?.packages || []) {
-    if (typeof pkg.dependent_repos_count === 'number') {
-      values.push(pkg.dependent_repos_count);
-    }
-
-    if (typeof pkg.dependent_packages_count === 'number') {
-      values.push(pkg.dependent_packages_count);
-    }
-  }
-
-  return values;
-};
-
-const noUsageRule = (countIssueAndPullRequestAuthors: boolean): Rule => ({
-  name: 'no-usage',
-  label: '1 maintainer and no usage (dependents or forks)',
-  test: (application, repoInfo) => {
-    const person = personCount(repoInfo, countIssueAndPullRequestAuthors);
-    const usage = usageCounts(repoInfo);
-
-    if (person !== null && person !== 1) {
-      return 'pass';
-    }
-
-    if (usage.some((value) => value > 0)) {
-      return 'pass';
-    }
-
-    if (person === 1 && usage.length > 0 && usage.every((value) => value === 0)) {
-      return 'fail';
-    }
-
-    return 'unverified';
-  },
-});
-
-const youngSmallRule = (countIssueAndPullRequestAuthors: boolean): Rule => ({
-  name: 'young-small',
-  label: 'fewer than 5 contributors and younger than 3 months',
-  test: (application, repoInfo) => {
-    const person = personCount(repoInfo, countIssueAndPullRequestAuthors);
-    const oldest = oldestProjectTimestamp(repoInfo);
-    const young = oldest === null ? null : oldest > Date.now() - THREE_MONTHS_MS;
-
-    if ((person !== null && person < 5) || young === true) {
-      return 'fail';
-    }
-
-    if (person !== null && person >= 5) {
-      return 'pass';
-    }
-
-    if (young === false) {
-      return 'pass';
-    }
-
-    return 'unverified';
-  },
-});
-
-const inactiveRule: Rule = {
-  name: 'inactive',
-  label: 'no activity in the last 3 months',
-  test: (application, repoInfo) => {
-    const pushedAt = repoInfo?.repository?.pushed_at;
-    if (pushedAt) {
-      const pushed = new Date(pushedAt).getTime();
-      if (!isNaN(pushed)) {
-        return pushed < Date.now() - THREE_MONTHS_MS ? 'fail' : 'pass';
-      }
-    }
-
-    const pastYearCommits = repoInfo?.contributors?.past_year_total_commits;
-    if (typeof pastYearCommits === 'number') {
-      return pastYearCommits === 0 ? 'fail' : 'pass';
-    }
-
-    return 'unverified';
-  },
-};
-
-const personalAccountRule: Rule = {
-  name: 'personal-account',
-  label: 'not under an org account',
-  test: (application, repoInfo) => {
-    const kind = repoInfo?.owner?.kind;
-    if (!kind) {
-      return 'unverified';
-    }
-
-    return kind === 'organization' ? 'pass' : 'fail';
-  },
-};
-
-const RULES: Rule[] = [noUsageRule(), youngSmallRule(), inactiveRule, personalAccountRule];
-
-function evaluateRules(application: PendingHostApplication, repoInfo?: RepoInfo, rules: Rule[] = RULES): RuleResult {
-  const checks = rules.map((rule) => ({ rule, outcome: rule.test(application, repoInfo) }));
-  const passed = checks.filter((check) => check.outcome === 'pass').map((check) => check.rule);
-  const failed = checks.filter((check) => check.outcome === 'fail').map((check) => check.rule);
-  const unverified = checks.filter((check) => check.outcome === 'unverified').map((check) => check.rule);
-
-  const verdict = failed.length > 0 ? 'fail' : passed.length > 0 ? 'pass' : 'unverified';
-  return { verdict, checks, passed, failed, unverified };
-}
+/**
+ * `block` = the application form would block the submission (errors), `warn` = issues to
+ * review but submittable, `unverified` = we could not verify the repository automatically,
+ * `pass` = no issue. Only `block` means "will not be approved as is".
+ */
+type Verdict = 'block' | 'warn' | 'unverified' | 'pass';
 
 const catchException = (e) => {
   debug(e);
@@ -348,17 +235,145 @@ function getRepositoryUrls(applications: PendingHostApplication[]): string[] {
   return urls;
 }
 
-function formatVerdict(result: RuleResult): string {
-  const states = result.checks.map((check) => `${check.rule.name}=${check.outcome}`).join(', ');
-  const verdict = result.verdict === 'pass' ? 'PASS' : result.verdict === 'fail' ? 'FAIL' : 'UNVERIFIED';
-  return ` [${verdict}: ${states}]`;
+/** Account slugs to leave alone, from the `--ignore` option */
+function parseIgnoredSlugs(ignore?: string): Set<string> {
+  return new Set(
+    (ignore || '')
+      .split(',')
+      .map((slug) => slug.trim().toLowerCase())
+      .filter(Boolean),
+  );
 }
 
-function formatApplicationLine(
+/** Rejects an application through `processHostApplication`, attaching the picked error message as the reason */
+async function rejectApplication(application: PendingHostApplication, message: string): Promise<void> {
+  await request(endpoint, processHostApplicationMutation, {
+    hostApplication: { id: application.publicId },
+    action: 'REJECT',
+    message,
+  });
+}
+
+/** Rejects every blocked application with its picked error message. Failures are logged and skipped. */
+async function applyRejections(rejections: Evaluation[]): Promise<{ rejected: number; failed: number }> {
+  let rejected = 0;
+  let failed = 0;
+
+  for (const { application, primaryError } of rejections) {
+    try {
+      await rejectApplication(application, RULE_MESSAGES[primaryError.id]);
+      rejected++;
+      info(`Rejected ${application.account.slug} "${application.account.name}" (${primaryError.id}).`);
+    } catch (e) {
+      failed++;
+      error(`Failed to reject ${application.account.slug} (${primaryError.id}): ${e.message}`);
+    }
+
+    await sleep(APPLY_DELAY_MS);
+  }
+
+  return { rejected, failed };
+}
+
+function repositoryInfoState(repositoryUrl?: string | null, repoInfo?: RepoInfo): RepositoryInfoState {
+  const url = (repositoryUrl || '').trim();
+  if (!url) {
+    return 'idle';
+  } else if (!repoInfo) {
+    // The lookup itself failed (network, rate limit, batch error...)
+    return 'error';
+  }
+  return repoInfo.repository ? 'found' : 'not-found';
+}
+
+function applicationFacts(application: PendingHostApplication, repoInfo?: RepoInfo): ApplicationFacts {
+  const customData = application.customData || {};
+  const admins = application.account.members?.totalCount || 0;
+  const invitations = application.account.memberInvitations?.length || 0;
+
+  return {
+    typeOfProject: customData.typeOfProject ?? null,
+    repositoryUrl: customData.repositoryUrl ?? null,
+    name: application.account.name,
+    message: application.message ?? '',
+    description: application.account.description ?? '',
+    teamSize: Math.max(1, admins + invitations),
+    // The application was submitted: the text rules always apply
+    applicationTextEngaged: true,
+    repositoryInfoState: repositoryInfoState(customData.repositoryUrl, repoInfo),
+    repository: repoInfo ? toRepositorySnapshot(repoInfo) : null,
+  };
+}
+
+function evaluate(
   application: PendingHostApplication,
   repoInfo: RepoInfo | undefined,
-  result: RuleResult,
-): string {
+  adminAccountIds: Set<string>,
+): Evaluation {
+  const snapshot = repoInfo ? toRepositorySnapshot(repoInfo) : null;
+  const facts = applicationFacts(application, repoInfo);
+  const metrics = getRuleMetrics(facts);
+  const flags = evaluateApplication(facts);
+  const errors = flagsBySeverity(flags, 'error');
+  const warnings = flagsBySeverity(flags, 'warning');
+  const infos = flagsBySeverity(flags, 'info');
+  const adminComments = hostAdminComments(application, adminAccountIds);
+
+  return {
+    application,
+    repoInfo,
+    snapshot,
+    facts,
+    metrics,
+    flags,
+    verdict: errors.length > 0 ? 'block' : warnings.length > 0 ? 'warn' : infos.length > 0 ? 'unverified' : 'pass',
+    primaryError: pickPrimaryError(flags),
+    adminCommentCount: adminComments.length,
+    interacted: adminComments.length > 0,
+  };
+}
+
+/** Account ids of the fiscal host team: the host account itself plus its admins */
+function hostAdminAccountIds(host: FetchResult['host']): Set<string> {
+  const ids = new Set<string>();
+  if (host?.id) {
+    ids.add(host.id);
+  }
+
+  for (const member of host?.members?.nodes || []) {
+    if (member.account?.id) {
+      ids.add(member.account.id);
+    }
+  }
+
+  return ids;
+}
+
+/** Comments left by the fiscal host team on an application */
+function hostAdminComments(
+  application: PendingHostApplication,
+  adminAccountIds: Set<string>,
+): HostApplicationComment[] {
+  return (application.comments?.nodes || []).filter((comment) =>
+    Boolean(comment.fromAccount?.id && adminAccountIds.has(comment.fromAccount.id)),
+  );
+}
+
+function flagIds(flags: RuleFlag[]): RuleId[] {
+  return flags.map((flag) => flag.id);
+}
+
+function formatFlag(flag: RuleFlag): string {
+  return `${flag.id}${flag.requiresConfirmation ? '^' : ''}`;
+}
+
+function formatVerdict(flags: RuleFlag[], verdict: Verdict): string {
+  const states = flags.map(formatFlag).join(', ');
+  return ` [${verdict.toUpperCase()}${states ? `: ${states}` : ''}]`;
+}
+
+function formatApplicationLine(evaluation: Evaluation): string {
+  const { application, repoInfo, flags, verdict, adminCommentCount } = evaluation;
   const { account, customData, message } = application;
   const created = application.createdAt.slice(0, 10);
   const signals = [];
@@ -409,8 +424,54 @@ function formatApplicationLine(
     signals.push(`comments=${application.comments.totalCount}`);
   }
 
+  if (adminCommentCount > 0) {
+    signals.push(`admin-comments=${adminCommentCount}`);
+  }
+
   const suffix = signals.length ? ` [${signals.join(', ')}]` : '';
-  return `${created}  ${account.slug}  "${account.name}"${suffix}${formatVerdict(result)}`;
+  return `${created}  ${account.slug}  "${account.name}"${suffix}${formatVerdict(flags, verdict)}`;
+}
+
+function formatNumber(value: number | null): string {
+  return value === null ? '?' : String(Math.round(value * 10) / 10);
+}
+
+/** The properties the rules used to reach the verdict (see `getRuleMetrics`) */
+function formatFactsLine({ metrics }: Evaluation): string {
+  const parts = [
+    `state=${metrics.repositoryInfoState}`,
+    `type=${metrics.typeOfProject ?? '?'}`,
+    `owner=${metrics.ownerKind ?? '?'}`,
+    `license=${metrics.license ?? '?'}`,
+    `contributors=${metrics.contributors ?? '?'}`,
+    `usage=${metrics.usage ?? '?'}`,
+    `ageMonths=${formatNumber(metrics.ageInMonths)}`,
+    `lastCommitMonths=${formatNumber(metrics.monthsSinceLastCommit)}`,
+    `teamSize=${metrics.teamSize}`,
+    `message=${metrics.messageLength}c`,
+    `description=${metrics.hasDescription ? 'yes' : 'no'}`,
+    `topics=${metrics.topics.length > 0 ? metrics.topics.join('|') : '?'}`,
+    metrics.applicationTextEngaged && 'textEngaged',
+    metrics.noCommunity && 'noCommunity',
+    metrics.weak && 'weak',
+    metrics.onPersonalAccount && 'onPersonalAccount',
+    metrics.communityMitigated && 'communityMitigated',
+    metrics.isFork && 'isFork',
+    metrics.archived && 'archived',
+  ].filter(Boolean);
+  return `  facts: [${parts.join(', ')}]`;
+}
+
+/** The messages we would send the applicant for the flagged rules, errors first */
+function formatMessageLines({ flags, primaryError }: Evaluation): string[] {
+  return [
+    ...flagsBySeverity(flags, 'error'),
+    ...flagsBySeverity(flags, 'warning'),
+    ...flagsBySeverity(flags, 'info'),
+  ].map(
+    (flag) =>
+      `  message ${flag.severity} ${flag.id}${flag.id === primaryError?.id ? ' (primary)' : ''}: ${RULE_MESSAGES[flag.id]}`,
+  );
 }
 
 const CSV_COLUMNS = [
@@ -432,6 +493,12 @@ const CSV_COLUMNS = [
   'dependent_packages',
   'last_activity',
   'owner_kind',
+  'verdict',
+  'errors',
+  'warnings',
+  'infos',
+  'primary_error',
+  'admin_comments',
 ];
 
 function csvCell(value: unknown): string {
@@ -443,21 +510,15 @@ function csvCell(value: unknown): string {
   return /["\n\r,]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
 }
 
-function monthsOld(repoInfo?: RepoInfo): number | null {
-  const oldest = oldestProjectTimestamp(repoInfo);
-  return oldest === null ? null : Math.round(((Date.now() - oldest) / (THREE_MONTHS_MS / 3)) * 10) / 10;
-}
-
-function applicationToCsvRow(application: PendingHostApplication, repoInfo?: RepoInfo): unknown[] {
+function applicationToCsvRow({
+  application,
+  snapshot,
+  flags,
+  verdict,
+  primaryError,
+  adminCommentCount,
+}: Evaluation): unknown[] {
   const customData = application.customData || {};
-  const dependentRepos =
-    repoInfo && repoInfo.packages.length > 0
-      ? repoInfo.packages.reduce((sum, pkg) => sum + (pkg.dependent_repos_count || 0), 0)
-      : null;
-  const dependentPackages =
-    repoInfo && repoInfo.packages.length > 0
-      ? repoInfo.packages.reduce((sum, pkg) => sum + (pkg.dependent_packages_count || 0), 0)
-      : null;
 
   return [
     application.publicId ? `http://opencollective.com/permalink/${application.publicId}` : '',
@@ -470,27 +531,40 @@ function applicationToCsvRow(application: PendingHostApplication, repoInfo?: Rep
     customData.repositoryUrl ?? '',
     customData.licenseSpdxId ?? '',
     customData.hasLegalEntity ?? '',
-    personCount(repoInfo) ?? '',
-    monthsOld(repoInfo) ?? '',
-    repoInfo?.repository?.forks_count ?? '',
-    repoInfo?.repository?.fork ?? '',
-    dependentRepos ?? '',
-    dependentPackages ?? '',
-    repoInfo?.repository?.pushed_at ? repoInfo.repository.pushed_at.slice(0, 10) : '',
-    repoInfo?.owner?.kind ?? '',
+    getContributors(snapshot) ?? '',
+    getProjectAgeInMonths(snapshot) ?? '',
+    snapshot?.forks ?? '',
+    snapshot?.isFork ?? '',
+    snapshot && snapshot.packages.length > 0
+      ? snapshot.packages.reduce((sum, pkg) => sum + (pkg.dependentReposCount || 0), 0)
+      : null,
+    snapshot && snapshot.packages.length > 0
+      ? snapshot.packages.reduce((sum, pkg) => sum + (pkg.dependentPackagesCount || 0), 0)
+      : null,
+    snapshot?.lastCommitAt ? snapshot.lastCommitAt.slice(0, 10) : '',
+    snapshot?.ownerKind ?? '',
+    verdict,
+    flagIds(flagsBySeverity(flags, 'error')).join(';'),
+    flagIds(flagsBySeverity(flags, 'warning')).join(';'),
+    flagIds(flagsBySeverity(flags, 'info')).join(';'),
+    primaryError?.id ?? '',
+    adminCommentCount,
   ];
 }
 
-function writeApplicationsCsv(
-  evaluations: { application: PendingHostApplication; repoInfo?: RepoInfo }[],
-  filePath: string,
-): void {
+function writeApplicationsCsv(evaluations: Evaluation[], filePath: string): void {
   const lines = [CSV_COLUMNS.join(',')];
-  for (const { application, repoInfo } of evaluations) {
-    lines.push(applicationToCsvRow(application, repoInfo).map(csvCell).join(','));
+  for (const evaluation of evaluations) {
+    lines.push(applicationToCsvRow(evaluation).map(csvCell).join(','));
   }
 
   fs.writeFileSync(filePath, lines.join('\n') + '\n');
+}
+
+function countByRule(counts: Map<string, number>, flags: RuleFlag[], severity: RuleSeverity): void {
+  for (const flag of flagsBySeverity(flags, severity)) {
+    counts.set(flag.id, (counts.get(flag.id) || 0) + 1);
+  }
 }
 
 async function main(argv = process.argv) {
@@ -503,8 +577,23 @@ async function main(argv = process.argv) {
     return;
   }
 
-  const { host, applications, totalCount } = result;
+  const { host, applications: allApplications, totalCount } = result;
   info(`Found ${totalCount} pending application(s) for ${host.name} (${host.slug}).`);
+
+  // Fiscal host team, to tell whether an application was already interacted with
+  const adminAccountIds = hostAdminAccountIds(host);
+
+  // Applications we were asked to leave alone: not evaluated, not exported, no action taken
+  const ignoredSlugs = parseIgnoredSlugs(options.ignore);
+  const applications = allApplications.filter(
+    (application) => !ignoredSlugs.has(application.account.slug.toLowerCase()),
+  );
+  if (applications.length !== allApplications.length) {
+    const ignored = allApplications
+      .filter((application) => ignoredSlugs.has(application.account.slug.toLowerCase()))
+      .map((application) => application.account.slug);
+    info(`Ignoring ${ignored.length} application(s): ${ignored.join(', ')}.`);
+  }
 
   const repositoryUrls = getRepositoryUrls(applications);
   const { repoInfoByUrl, fetched, fromCache } = await fetchRepoInfo(repositoryUrls, {
@@ -519,26 +608,32 @@ async function main(argv = process.argv) {
     const repositoryUrl =
       typeof application.customData?.repositoryUrl === 'string' ? application.customData.repositoryUrl.trim() : null;
     const repoInfo = repositoryUrl ? repoInfoByUrl.get(normalizeRepoKey(repositoryUrl)) : undefined;
-    return { application, repoInfo, result: evaluateRules(application, repoInfo) };
+    return evaluate(application, repoInfo, adminAccountIds);
   });
 
-  for (const { application, repoInfo, result } of evaluations) {
-    debug(formatApplicationLine(application, repoInfo, result));
+  for (const evaluation of evaluations) {
+    debug(formatApplicationLine(evaluation));
+    debug(formatFactsLine(evaluation));
+    for (const messageLine of formatMessageLines(evaluation)) {
+      debug(messageLine);
+    }
   }
 
   if (applications.length < totalCount) {
     info(`Fetched ${applications.length} of ${totalCount} (limit reached).`);
   }
 
-  const verdictCounts = { pass: 0, fail: 0, unverified: 0 };
-  const failCountByRule = new Map<string, number>();
+  const verdictCounts: Record<Verdict, number> = { block: 0, warn: 0, unverified: 0, pass: 0 };
+  const severityCounts: Record<RuleSeverity, number> = { error: 0, warning: 0, info: 0 };
+  const errorCountByRule = new Map<string, number>();
+  const warningCountByRule = new Map<string, number>();
   const failCountByCombination = new Map<string, number>();
   let withPackageInfo = 0;
   let withRepositoryInfoOnly = 0;
   let withoutRepoInfo = 0;
 
-  for (const { repoInfo, result } of evaluations) {
-    verdictCounts[result.verdict]++;
+  for (const { repoInfo, flags, verdict } of evaluations) {
+    verdictCounts[verdict]++;
     if (repoInfo && repoInfo.packages.length > 0) {
       withPackageInfo++;
     } else if (repoInfo && repoInfo.repository) {
@@ -547,21 +642,32 @@ async function main(argv = process.argv) {
       withoutRepoInfo++;
     }
 
-    for (const rule of result.failed) {
-      failCountByRule.set(rule.name, (failCountByRule.get(rule.name) || 0) + 1);
-    }
+    severityCounts.error += flagsBySeverity(flags, 'error').length;
+    severityCounts.warning += flagsBySeverity(flags, 'warning').length;
+    severityCounts.info += flagsBySeverity(flags, 'info').length;
+    countByRule(errorCountByRule, flags, 'error');
+    countByRule(warningCountByRule, flags, 'warning');
 
-    if (result.failed.length > 0) {
-      const combination = result.failed.map((rule) => rule.name).join(' + ');
+    const errors = flagIds(flagsBySeverity(flags, 'error')).sort();
+    if (errors.length > 0) {
+      const combination = errors.join(' + ');
       failCountByCombination.set(combination, (failCountByCombination.get(combination) || 0) + 1);
     }
   }
 
   info(
-    `Rules (${RULES.map((rule) => rule.label).join('; ')}): passed ${verdictCounts.pass}, failed ${verdictCounts.fail}, unverified ${verdictCounts.unverified} (of ${evaluations.length}).`,
+    `Rules (see application-rules.ts): blocked ${verdictCounts.block}, warned ${verdictCounts.warn}, unverified ${verdictCounts.unverified}, clean ${verdictCounts.pass} (of ${evaluations.length}).`,
   );
-  info(`Failures by rule: ${RULES.map((rule) => `${rule.name}=${failCountByRule.get(rule.name) || 0}`).join(', ')}.`);
-  info(`Failures by combination:`);
+  info(
+    `Flags by severity: error=${severityCounts.error}, warning=${severityCounts.warning}, info=${severityCounts.info}.`,
+  );
+  const printCounts = (label: string, counts: Map<string, number>) => {
+    const entries = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    info(`${label}${entries.length ? ` ${entries.map(([id, count]) => `${id}=${count}`).join(', ')}` : ' none'}.`);
+  };
+  printCounts('Errors by rule:', errorCountByRule);
+  printCounts('Warnings by rule:', warningCountByRule);
+  info(`Errors by combination:`);
   const combinations = [...failCountByCombination.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   for (const [combination, count] of combinations) {
     info(`  ${count} x ${combination}`);
@@ -570,9 +676,52 @@ async function main(argv = process.argv) {
     `Ecosyste.ms data: ${withPackageInfo} with package info, ${withRepositoryInfoOnly} with repository info only, ${withoutRepoInfo} without repo info.`,
   );
 
+  const interacted = evaluations.filter((evaluation) => evaluation.interacted);
+  const notInteracted = evaluations.filter((evaluation) => !evaluation.interacted);
+  // Applications we would not reject (warnings only) and that nobody from the host team has
+  // followed up on yet: a warning message is all we would send them.
+  const warningCandidates = notInteracted.filter((evaluation) => evaluation.verdict === 'warn');
+  info(
+    `Host admin interaction: ${interacted.length} of ${evaluations.length} application(s) have a comment from a fiscal host admin; ${notInteracted.length} have not been interacted with.`,
+  );
+  info(
+    `Could receive a warning: ${warningCandidates.length} uninteracted application(s) have warnings only (not blocked, so a warning message is all we would send).`,
+  );
+
   const csvPath = options.csv || path.join(__dirname, 'applications.csv');
   writeApplicationsCsv(evaluations, csvPath);
   info(`Wrote ${evaluations.length} application(s) to ${csvPath}.`);
+
+  // Dry run (default): report the rejections we would perform, one picked error per application.
+  // Applications with warnings only are left alone. With --apply, the same list is actually rejected.
+  const rejections = evaluations.filter((evaluation) => evaluation.primaryError !== null);
+  const leftAlone = evaluations.length - rejections.length;
+
+  if (!options.apply) {
+    info(`DRY RUN: ${rejections.length} application(s) would be rejected (${leftAlone} left alone):`);
+    for (const { application, primaryError } of rejections) {
+      info(`  ${application.account.slug} "${application.account.name}" -> ${primaryError.id}`);
+      info(`    ${RULE_MESSAGES[primaryError.id]}`);
+    }
+
+    info(`DRY RUN: ${warningCandidates.length} uninteracted application(s) could receive a warning:`);
+    for (const { application, flags } of warningCandidates) {
+      const warnings = flagIds(flagsBySeverity(flags, 'warning')).join(', ');
+      info(`  ${application.account.slug} "${application.account.name}" -> ${warnings}`);
+    }
+    return;
+  }
+
+  warn(`APPLY MODE: rejecting ${rejections.length} application(s) (${leftAlone} left alone):`);
+  for (const { application, primaryError } of rejections) {
+    warn(`  ${application.account.slug} "${application.account.name}" -> ${primaryError.id}`);
+  }
+
+  const { rejected, failed } = await applyRejections(rejections);
+  info(`Rejected ${rejected} application(s)${failed > 0 ? `, ${failed} failed` : ''}.`);
+  if (failed > 0) {
+    process.exitCode = 1;
+  }
 }
 
 const getProgram = (argv) => {
@@ -581,6 +730,8 @@ const getProgram = (argv) => {
   program.showSuggestionAfterError();
 
   program.option('--limit <n>', 'Maximum number of applications to fetch', (value) => parseInt(value, 10));
+  program.option('--ignore <slugs>', 'Comma-separated account slugs to leave alone (not evaluated, no action)');
+  program.option('--apply', 'Reject the blocked applications (defaults to a dry run - writes to the API)');
   program.option('--ignore-cache', 'Ignore the local ecosyste.ms cache and refetch from the API');
   program.option('--csv <path>', 'Path for the CSV export');
 
