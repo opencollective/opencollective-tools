@@ -47,6 +47,14 @@ export type RepositorySnapshot = {
     /** Bot committers reported by the commits API, when available */
     botCommitters?: number;
   } | null;
+  /** Filled by clients that know the applicant's email */
+  applicantIsContributor?: boolean;
+  applicantContribution?: {
+    login: string | null;
+    name: string | null;
+    email: string;
+    count: number | null;
+  } | null;
   packages: Array<{
     name: string;
     ecosystem: string;
