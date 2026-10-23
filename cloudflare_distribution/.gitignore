@@ -1,0 +1,3 @@
+# Recipient data, never commit
+*.csv
+results.json

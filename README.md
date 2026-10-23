@@ -64,3 +64,10 @@ Check that the number of approved Expenses is the expected one and that there is
 5. Proceed Expense Payments with, enter your 2FA token when asked.
 
 `node 1kproject/pay-expenses.js --run`
+
+## Export updates to Markdown
+
+Exports all published updates of a collective to Markdown files (with front matter), e.g. for migrating to another CMS.
+Use the production API (`API_URL=https://api.opencollective.com`).
+
+`node export-updates/export-updates-to-markdown.js --slug opensource --out ../osc-updates`
