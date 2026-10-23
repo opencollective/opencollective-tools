@@ -92,6 +92,33 @@ Before a follow-up, check on the Fund's expenses page that the earlier invite ex
 
 To redo a row that was handled by mistake, delete its entry from `results.json` (and clear its `Status` in the CSV), then rerun.
 
+## Corrections and resends
+
+Before skipping a row that is in `results.json`, the script checks what happened to the expense or contribution it created. If that payment **failed**, it is sent again, **but only when the row now has a different payee**. Failed means:
+
+- an expense that was rejected, cancelled, declined (`INVITE_DECLINED`), in error, marked as spam or **deleted**
+- a contribution that was rejected, cancelled, expired, in error or **deleted**
+- an expense or contribution that was **refunded**
+
+The payee is the Open Collective account in `Donation URL` when there is one, and the `contact address` (case-insensitive) otherwise. So to fix a mistake, correct the row in the CSV (a new contact address, or the URL of the right Collective) and rerun. In the dry run these rows show as `[resend]` reasons in their bucket (`ready`, `existing-account-expense` or `needs-invite`), for example "Resending, previous expense #123 (REJECTED) went to a different payee".
+
+| Previous payment                         | Payee in the CSV | Result                                               |
+| ---------------------------------------- | ---------------- | ---------------------------------------------------- |
+| Failed                                   | Different        | Sent again                                           |
+| Failed                                   | Same             | Not sent again (`already-done`)                      |
+| Failed, `INVITE_DECLINED`, payee unknown | Any              | Not sent again, the recipient said no                |
+| Failed, other status, payee unknown      | Any              | Sent again, the reason says "previous payee unknown" |
+| Still alive (pending, approved, paid...) | Any              | Left alone                                           |
+
+Things to know:
+
+- **A resend ignores a link or `Sent` in `Status`**, since that link points at the failed payment.
+- **The payee is recorded in `results.json` from now on.** Entries written by earlier versions of the script do not have it. For those, the script tries to work it out (the invited email of a draft, the account of an expense on an existing account), but a rejected or deleted invite no longer exposes the email. In that case the payee counts as unknown and the row is sent again even if the address did not change, so **read the dry run before `--run`**.
+- **History is kept.** When a row is sent again, the old entry is stored under `history` in its new ledger entry.
+- **A failed payment to the same payee is never retried automatically.** If you want it sent again anyway, delete its entry from `results.json` and clear its `Status`.
+- **Deleted and refunded payments are only found through the ledger.** A payment that was never recorded there is not tracked.
+- Each ledger row costs one extra API call per run, plus a full read of the Fund's transactions to find refunds.
+
 ## Links in the CSV
 
 `--update-csv` writes a copy of the CSV (`<name>.with-links.csv`, the original is untouched) where the `Status` column holds a link to the order or expense for each row that has one. Links come from `results.json` and from activity the Fund already has:

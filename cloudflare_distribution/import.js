@@ -33,6 +33,10 @@ const OPEN_EXPENSE_STATUSES = [
   'PAID',
 ];
 
+// A previous expense/contribution in one of these states (or deleted, or refunded) can be sent again
+const FAILED_EXPENSE_STATUSES = ['REJECTED', 'CANCELED', 'INVITE_DECLINED', 'ERROR', 'SPAM'];
+const FAILED_ORDER_STATUSES = ['REJECTED', 'CANCELLED', 'EXPIRED', 'ERROR', 'REFUNDED'];
+
 const accountFields = `
   id
   legacyId
@@ -131,6 +135,49 @@ const fundExpensesQuery = gql`
         customData
         payee {
           slug
+        }
+      }
+    }
+  }
+`;
+
+const expenseCheckQuery = gql`
+  query ExpenseCheck($id: Int!) {
+    expense(expense: { legacyId: $id }) {
+      status
+      draft
+      payee {
+        slug
+      }
+    }
+  }
+`;
+
+const orderCheckQuery = gql`
+  query OrderCheck($id: Int!) {
+    order(order: { legacyId: $id }) {
+      status
+      toAccount {
+        slug
+      }
+    }
+  }
+`;
+
+// All-time debits, to spot expenses and contributions that were refunded
+const fundRefundsQuery = gql`
+  query FundRefunds($slug: String!, $offset: Int!) {
+    account(slug: $slug) {
+      transactions(type: DEBIT, limit: 100, offset: $offset) {
+        totalCount
+        nodes {
+          isRefunded
+          order {
+            legacyId
+          }
+          expense {
+            legacyId
+          }
         }
       }
     }
@@ -236,6 +283,7 @@ const formatCents = (cents, currency) => `${(cents / 100).toLocaleString('en-US'
 async function fetchExistingActivity(fundSlug) {
   const dateFrom = startOfCurrentMonth();
 
+  console.log("Reading the Fund's transactions, contributions and expenses (can take a minute)...");
   const transactions = await fetchAll(
     fundTransactionsQuery,
     { slug: fundSlug, dateFrom },
@@ -247,6 +295,17 @@ async function fetchExistingActivity(fundSlug) {
     transactions.filter((t) => !t.isRefunded && t.oppositeAccount).map((t) => [t.oppositeAccount.slug, toRef(t)]),
   );
 
+  const allDebits = await fetchAll(fundRefundsQuery, { slug: fundSlug }, (data) => data.account.transactions);
+  const refunded = new Set();
+  for (const t of allDebits.filter((t) => t.isRefunded)) {
+    if (t.expense) {
+      refunded.add(`expense:${t.expense.legacyId}`);
+    }
+    if (t.order) {
+      refunded.add(`order:${t.order.legacyId}`);
+    }
+  }
+
   const orders = await fetchAll(fundOrdersQuery, { slug: fundSlug }, (data) => data.account.orders);
   const recurring = new Map(orders.map((o) => [o.toAccount.slug, o.legacyId]));
 
@@ -256,6 +315,10 @@ async function fetchExistingActivity(fundSlug) {
   const expenseCreatedAt = new Map();
   for (const expense of expenses) {
     expenseCreatedAt.set(expense.legacyId, expense.createdAt);
+    // A refunded expense must not block sending it again
+    if (refunded.has(`expense:${expense.legacyId}`)) {
+      continue;
+    }
     // Paid expenses only count if they were created this month, anything still open always counts
     if (expense.status === 'PAID' && expense.createdAt < dateFrom) {
       continue;
@@ -269,7 +332,7 @@ async function fetchExistingActivity(fundSlug) {
     }
   }
 
-  return { paidThisMonth, recurring, expensesByKey, expensesBySlug, expenseCreatedAt };
+  return { paidThisMonth, recurring, expensesByKey, expensesBySlug, expenseCreatedAt, refunded };
 }
 
 const refFromLedger = (text) => {
@@ -331,6 +394,58 @@ function findInviteExpense(row, record, ledgerEntry, existing) {
   return { id, createdAt };
 }
 
+const isNotFound = (err) =>
+  err.response?.errors?.[0]?.extensions?.code === 'NotFound' || /not found/i.test(err.response?.errors?.[0]?.message);
+
+// Who a row pays: the Open Collective account when there is one, the contact address otherwise
+const payeeOf = (account, record) => {
+  if (account) {
+    return `slug:${account.slug}`;
+  }
+  const email = record['contact address']?.trim().toLowerCase();
+  return email ? `email:${email}` : null;
+};
+
+// Looks at what a previous ledger entry became: is it still alive, failed (rejected, deleted, refunded...) and who was paid
+async function checkPrevious(ref, existing, ledgerEntry) {
+  const refKey = `${ref.type}:${ref.id}`;
+  let status = null;
+  let payee = ledgerEntry.payee || null;
+  try {
+    if (ref.type === 'expense') {
+      const { expense } = await rateLimitedRequest(expenseCheckQuery, { id: Number(ref.id) });
+      status = expense ? expense.status : 'DELETED';
+      if (expense && !payee) {
+        // Older ledger entries did not record the payee. Drafts expose the invited email, existing accounts the payee
+        const draftEmail = expense.draft?.payee?.email?.trim().toLowerCase();
+        if (draftEmail) {
+          payee = `email:${draftEmail}`;
+        } else if (/^existing-account-expense:/.test(ledgerEntry.done) && expense.payee?.slug) {
+          payee = `slug:${expense.payee.slug}`;
+        }
+      }
+    } else {
+      const { order } = await rateLimitedRequest(orderCheckQuery, { id: Number(ref.id) });
+      status = order ? order.status : 'DELETED';
+      if (order && !payee && order.toAccount?.slug) {
+        payee = `slug:${order.toAccount.slug}`;
+      }
+    }
+  } catch (err) {
+    if (!isNotFound(err)) {
+      return { failed: false, error: err.response?.errors?.[0]?.message || err.message };
+    }
+    status = 'DELETED';
+  }
+
+  if (existing.refunded.has(refKey)) {
+    status = 'REFUNDED';
+  }
+  const failedStatuses = ref.type === 'expense' ? FAILED_EXPENSE_STATUSES : FAILED_ORDER_STATUSES;
+  const failed = status === 'DELETED' || status === 'REFUNDED' || failedStatuses.includes(status);
+  return { failed, status, payee };
+}
+
 const normalizeKey = (name) =>
   String(name)
     .toLowerCase()
@@ -367,11 +482,44 @@ async function classify(record, index, { fundHostId, existing, ledger, sharedSlu
   }
   row.account = account;
 
+  // Previous expense/contribution for this row that failed (rejected, declined, deleted, refunded...): send it again,
+  // but only when the row now has a different payee (another Collective or another contact address).
+  let resend = null;
+  const previous = ledger[key]?.done && (ledger[key].ref || refFromLedger(ledger[key].done));
+  if (previous) {
+    console.log(`  ${row.id}: checking previous ${previous.type} #${previous.id}...`);
+    const check = await checkPrevious(previous, existing, ledger[key]);
+    if (check.error) {
+      return {
+        ...row,
+        bucket: 'ambiguous',
+        reason: `Could not check previous ${previous.type} #${previous.id}: ${check.error}`,
+      };
+    }
+    if (check.failed) {
+      const current = payeeOf(account, record);
+      const what = `${previous.type} #${previous.id} (${check.status})`;
+      if (check.payee && check.payee === current) {
+        return {
+          ...row,
+          bucket: 'already-done',
+          reason: `Previous ${what}, but the payee is unchanged: not sent again`,
+        };
+      }
+      if (!check.payee && check.status === 'INVITE_DECLINED') {
+        return { ...row, bucket: 'already-done', reason: `Previous ${what}, previous payee unknown: not sent again` };
+      }
+      resend = `Resending, previous ${what} ${check.payee ? 'went to a different payee' : '(previous payee unknown)'}`;
+    }
+  }
+  const resendable = (result) => (resend ? { ...result, resend: true, reason: `${resend}. ${result.reason}` } : result);
+
   // Follow-up for monthly rows that were handled with an invite expense: once the recipient has an account that can
   // receive balance contributions (the CSV was updated with it), set up the monthly contribution. Not in the same
   // month as the invite, which already covers that month's payment.
   const invite = findInviteExpense(row, record, ledger[key], existing);
   if (
+    !resend &&
     row.frequency === 'MONTHLY' &&
     invite &&
     canReceiveFromFund(account, fundHostId) &&
@@ -392,7 +540,7 @@ async function classify(record, index, { fundHostId, existing, ledger, sharedSlu
     };
   }
 
-  if (ledger[key]?.done) {
+  if (!resend && ledger[key]?.done) {
     return { ...row, bucket: 'already-done', reason: `Ledger: ${ledger[key].done}` };
   }
   if (lookupFailed) {
@@ -425,7 +573,7 @@ async function classify(record, index, { fundHostId, existing, ledger, sharedSlu
   }
   // The Status column holds either "Sent" or, once this script has handled a row, a link to the order/expense
   const status = record['Status'].trim();
-  if (/^sent$/i.test(status) || /^https?:\/\//i.test(status)) {
+  if (!resend && (/^sent$/i.test(status) || /^https?:\/\//i.test(status))) {
     return {
       ...row,
       bucket: 'skipped-sent',
@@ -439,17 +587,17 @@ async function classify(record, index, { fundHostId, existing, ledger, sharedSlu
     if (!record['contact address']?.trim()) {
       return { ...row, bucket: 'ambiguous', reason: 'No Open Collective account and no contact address' };
     }
-    return { ...row, bucket: 'needs-invite', reason: 'No Open Collective account' };
+    return resendable({ ...row, bucket: 'needs-invite', reason: 'No Open Collective account' });
   }
   if (account.isArchived || account.isFrozen) {
     return { ...row, bucket: 'ambiguous', reason: `Account ${account.slug} is archived or frozen` };
   }
   const host = account.host;
   if (host && account.isActive && host.id === fundHostId) {
-    return { ...row, bucket: 'ready', reason: 'Same host, can contribute from the Fund balance' };
+    return resendable({ ...row, bucket: 'ready', reason: 'Same host, can contribute from the Fund balance' });
   }
   // Balance transfers only work inside one host, so everything else goes through an expense on the existing account
-  return {
+  return resendable({
     ...row,
     bucket: 'existing-account-expense',
     reason: host
@@ -457,7 +605,7 @@ async function classify(record, index, { fundHostId, existing, ledger, sharedSlu
         ? 'Account is not active yet'
         : 'Different host than the Fund'
       : 'Account has no host (e.g. individual)',
-  };
+  });
 }
 
 const buildInviteExpense = (row, fund, { recipientNotes, description }) => {
@@ -567,9 +715,14 @@ async function main(argv = process.argv) {
   const context = { fundHostId: fund.host.id, existing, ledger, sharedSlugs };
 
   const rows = [];
+  console.log(`Checking ${records.length} rows against Open Collective, this can take a few minutes...`);
   for (const [index, record] of records.entries()) {
     rows.push(await classify(record, index, context));
+    if ((index + 1) % 10 === 0 && index + 1 < records.length) {
+      console.log(`  ${index + 1}/${records.length} rows checked`);
+    }
   }
+  console.log(`Done, ${records.length}/${records.length} rows checked.`);
 
   try {
     const buckets = printSummary(rows, fund);
@@ -615,7 +768,15 @@ async function main(argv = process.argv) {
           paymentMethodId: paymentMethod?.id,
           inviteOptions,
         });
-        ledger[row.key] = { done: `${row.bucket}: ${result}`, at: new Date().toISOString() };
+        const old = ledger[row.key];
+        ledger[row.key] = {
+          done: `${row.bucket}: ${result}`,
+          at: new Date().toISOString(),
+          ref: refFromLedger(result),
+          payee: payeeOf(row.account, row.record),
+          // Keep what was sent before when a row is sent again
+          ...(old && { history: [...(old.history || []), { done: old.done, at: old.at, payee: old.payee }] }),
+        };
         saveLedger(ledgerPath, ledger);
         console.log(`${row.id}: ${row.bucket} -> ${result}`);
       } catch (err) {
