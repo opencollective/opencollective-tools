@@ -383,10 +383,12 @@ export const RULE_MESSAGES: Record<RuleId, string> = {
 
 /** Human contributors: the largest of the committer and package-maintainer counts */
 export function getContributors(repository?: RepositorySnapshot | null): number | null {
-  const counts = [
-    repository?.commitStats?.totalCommitters,
-    ...(repository?.packages || []).map((pkg) => pkg.maintainers.length),
-  ].filter((count): count is number => typeof count === 'number');
+  // An empty package maintainer list can just mean the metadata is missing: only count
+  // non-empty lists, otherwise sparse lookups would look like a confirmed zero contributors.
+  const packageCounts = (repository?.packages || []).map((pkg) => pkg.maintainers.length).filter((count) => count > 0);
+  const counts = [repository?.commitStats?.totalCommitters, ...packageCounts].filter(
+    (count): count is number => typeof count === 'number',
+  );
   return counts.length > 0 ? Math.max(...counts) : null;
 }
 
