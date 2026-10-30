@@ -25,8 +25,8 @@
   },
   "dependencies": {
     "@octokit/rest": "^22.0.1",
-    "@slack/bolt": "^3.12.2",
-    "axios": "^0.26.1",
+    "@slack/bolt": "^3.22.0",
+    "axios": "^1.20.0",
     "commander": "^8.3.0",
     "csv-parse": "^5.0.4",
     "debug": "^4.4.3",
