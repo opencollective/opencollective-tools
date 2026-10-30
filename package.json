@@ -28,7 +28,7 @@
     "@slack/bolt": "^3.12.2",
     "axios": "^0.26.1",
     "commander": "^8.3.0",
-    "csv-parse": "^5.0.4",
+    "csv-parse": "^7.0.2",
     "debug": "^4.4.3",
     "dotenv": "^14.3.2",
     "graphql": "^16.12.0",
