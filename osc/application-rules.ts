@@ -37,6 +37,9 @@ export type RepositorySnapshot = {
   archived: boolean | null;
   /** Repository creation date */
   createdAt: string | null;
+  /** Date of the first commit on the default branch (may differ from the repository creation date) */
+  firstCommitAt: string | null;
+  firstCommitSha: string | null;
   /** Date of the last commit/push activity */
   lastCommitAt: string | null;
   lastCommitSha: string | null;
@@ -112,6 +115,8 @@ export function toRepositorySnapshot(entry: RepoInfo): RepositorySnapshot {
     topics: repository?.topics ?? [],
     archived: repository?.archived ?? null,
     createdAt: repository?.created_at ?? null,
+    firstCommitAt: entry.firstCommit?.timestamp ?? null,
+    firstCommitSha: entry.firstCommit?.sha ?? null,
     lastCommitAt: repository?.pushed_at ?? null,
     lastCommitSha: repository?.commit_stats?.last_synced_commit ?? null,
     commitStats: hasCommitStats
@@ -408,9 +413,13 @@ export function getUsage(repository?: RepositorySnapshot | null): number | null 
   return counts.length > 0 ? Math.max(...counts) : null;
 }
 
-/** Project age in months, from the oldest of the repository creation and the first package release */
+/** Project age in months, from the oldest of the first commit, the repository creation and the first package release */
 export function getProjectAgeInMonths(repository?: RepositorySnapshot | null, now: number = Date.now()): number | null {
-  const timestamps = [repository?.createdAt, ...(repository?.packages || []).map((pkg) => pkg.firstReleasePublishedAt)]
+  const timestamps = [
+    repository?.firstCommitAt,
+    repository?.createdAt,
+    ...(repository?.packages || []).map((pkg) => pkg.firstReleasePublishedAt),
+  ]
     .map((value) => (value ? new Date(value).getTime() : NaN))
     .filter((time) => !isNaN(time));
   if (timestamps.length === 0) {

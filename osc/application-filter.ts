@@ -491,6 +491,7 @@ const CSV_COLUMNS = [
   'is_fork',
   'dependent_repos',
   'dependent_packages',
+  'first_commit',
   'last_activity',
   'owner_kind',
   'verdict',
@@ -541,6 +542,7 @@ function applicationToCsvRow({
     snapshot && snapshot.packages.length > 0
       ? snapshot.packages.reduce((sum, pkg) => sum + (pkg.dependentPackagesCount || 0), 0)
       : null,
+    snapshot?.firstCommitAt ? snapshot.firstCommitAt.slice(0, 10) : '',
     snapshot?.lastCommitAt ? snapshot.lastCommitAt.slice(0, 10) : '',
     snapshot?.ownerKind ?? '',
     verdict,
