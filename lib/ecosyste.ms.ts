@@ -64,8 +64,20 @@ export type EcosystemsCommitsRepository = {
   past_year_total_bot_committers?: number;
   created_at?: string;
   updated_at?: string;
+  /** URL of the commits list for the repository (`.../repositories/{owner}%2F{name}/commits`) */
+  commits_url?: string | null;
   committers?: EcosystemsCommitter[];
   past_year_committers?: EcosystemsCommitter[];
+};
+
+export type EcosystemsCommit = {
+  sha: string;
+  message?: string | null;
+  author?: string | null;
+  committer?: string | null;
+  timestamp: string;
+  merge?: boolean;
+  html_url?: string | null;
 };
 
 export type EcosystemsMaintainer = {
@@ -116,6 +128,8 @@ export type RepoInfo = {
   contributors: EcosystemsCommitsRepository | null;
   issues: EcosystemsIssuesRepository | null;
   owner: EcosystemsOwner | null;
+  /** Oldest commit of the default branch, from the commits API (null when unavailable) */
+  firstCommit: EcosystemsCommit | null;
 };
 
 type RepoCacheEntry = {
@@ -124,6 +138,7 @@ type RepoCacheEntry = {
   contributors: EcosystemsCommitsRepository | null;
   issues: EcosystemsIssuesRepository | null;
   owner: EcosystemsOwner | null;
+  firstCommit: EcosystemsCommit | null;
 };
 
 type RepoCacheRecord = RepoCacheEntry & {
@@ -183,6 +198,33 @@ export async function fetchIssuesLookup(url: string): Promise<EcosystemsIssuesRe
   return fetchLookup(ECOSYSTEMS_ISSUES_API_URL, url);
 }
 
+/**
+ * Fetches the oldest commit of a repository. ecosyste.ms doesn't expose the first commit on the
+ * repository record, but its commits list accepts `order=asc&per_page=1`.
+ */
+export async function fetchFirstCommit(commitsUrl: string): Promise<EcosystemsCommit | null> {
+  const url = new URL(commitsUrl);
+  // The URL comes from the upstream payload: only follow it on the ecosyste.ms commits host
+  if (url.protocol !== 'https:' || url.hostname !== new URL(ECOSYSTEMS_COMMITS_API_URL).hostname) {
+    return null;
+  }
+
+  try {
+    const response = await axios.get(url.toString(), {
+      params: { order: 'asc', per_page: 1, mailto: ECOSYSTEMS_MAILTO },
+    });
+    // A pending repository replies 202 with a status object rather than a list of commits
+    const commits = response.data;
+    return Array.isArray(commits) && commits.length > 0 ? commits[0] : null;
+  } catch (e) {
+    if (e.response?.status === 404) {
+      return null;
+    }
+
+    throw e;
+  }
+}
+
 export async function fetchOwnerLookup(hostName: string, owner: string): Promise<EcosystemsOwner | null> {
   try {
     const response = await axios.get(
@@ -226,7 +268,8 @@ function readRepoCache(cacheDir: string, key: string): RepoCacheEntry | null {
     !('repository' in cached) ||
     !('contributors' in cached) ||
     !('issues' in cached) ||
-    !('owner' in cached)
+    !('owner' in cached) ||
+    !('firstCommit' in cached)
   ) {
     return null;
   }
@@ -242,6 +285,7 @@ function readRepoCache(cacheDir: string, key: string): RepoCacheEntry | null {
     contributors: cached.contributors,
     issues: cached.issues,
     owner: cached.owner,
+    firstCommit: cached.firstCommit,
   };
 }
 
@@ -274,6 +318,7 @@ export async function fetchRepoInfo(
         contributors: cached.contributors,
         issues: cached.issues,
         owner: cached.owner,
+        firstCommit: cached.firstCommit,
       });
       fromCache++;
     } else {
@@ -310,6 +355,7 @@ export async function fetchRepoInfo(
           contributors: null,
           issues: null,
           owner: null,
+          firstCommit: null,
         };
         let cacheable = true;
 
@@ -332,6 +378,17 @@ export async function fetchRepoInfo(
         }
 
         await sleep(ECOSYSTEMS_LOOKUP_DELAY_MS);
+
+        if (entry.contributors?.commits_url) {
+          try {
+            entry.firstCommit = await fetchFirstCommit(entry.contributors.commits_url);
+          } catch (e) {
+            error(`Error fetching ecosyste.ms first commit for ${url}: ${e.message}`);
+            cacheable = false;
+          }
+
+          await sleep(ECOSYSTEMS_LOOKUP_DELAY_MS);
+        }
 
         try {
           entry.issues = await fetchIssuesLookup(url);
